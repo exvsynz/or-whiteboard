@@ -10,6 +10,7 @@ interface UnassignedPoolProps {
   totalUnassigned: number;
   hiddenUnassigned: number;
   onPersonClick?: (person: BoardPerson) => void;
+  onRemovePerson?: (personId: string) => void;
 }
 
 export const UnassignedPool = memo(function UnassignedPool({
@@ -17,6 +18,7 @@ export const UnassignedPool = memo(function UnassignedPool({
   totalUnassigned,
   hiddenUnassigned,
   onPersonClick,
+  onRemovePerson,
 }: UnassignedPoolProps) {
   return (
     <section aria-label="未分派">
@@ -29,7 +31,7 @@ export const UnassignedPool = memo(function UnassignedPool({
         dashed
       >
         {unassignedPeople.map((p) => (
-          <PersonCard key={p.id} person={p} onClick={onPersonClick ? () => onPersonClick(p) : undefined} />
+          <PersonCard key={p.id} person={p} onClick={onPersonClick ? () => onPersonClick(p) : undefined} onRemove={onRemovePerson ? () => onRemovePerson(p.id) : undefined} />
         ))}
       </AreaBox>
     </section>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Search, Plus, RotateCcw, Save } from "lucide-react";
+import { Search, Plus, RotateCcw, Save, Upload, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 interface BoardToolbarProps {
@@ -9,6 +9,9 @@ interface BoardToolbarProps {
   onSearchChange: (query: string) => void;
   onAddPerson: (name: string) => void;
   onReset: () => void;
+  onImportClick?: () => void;
+  onExportCSV?: () => void;
+  onExportXLSX?: () => void;
 }
 
 export function BoardToolbar({
@@ -16,8 +19,12 @@ export function BoardToolbar({
   onSearchChange,
   onAddPerson,
   onReset,
+  onImportClick,
+  onExportCSV,
+  onExportXLSX,
 }: BoardToolbarProps) {
   const [newName, setNewName] = useState("");
+  const [showExportMenu, setShowExportMenu] = useState(false);
 
   const handleAdd = () => {
     const trimmed = newName.trim();
@@ -31,7 +38,7 @@ export function BoardToolbar({
   };
 
   return (
-    <div className="flex flex-col gap-2 sm:flex-row">
+    <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
       <div className="relative">
         <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
         <input
@@ -56,11 +63,60 @@ export function BoardToolbar({
           新增
         </Button>
       </div>
+      {onImportClick && (
+        <Button variant="outline" className="rounded-2xl" onClick={onImportClick}>
+          <Upload className="mr-1 h-4 w-4" />
+          匯入班表
+        </Button>
+      )}
+      {(onExportCSV || onExportXLSX) && (
+        <div className="relative">
+          <Button
+            variant="outline"
+            className="rounded-2xl"
+            onClick={() => setShowExportMenu((v) => !v)}
+          >
+            <Download className="mr-1 h-4 w-4" />
+            匯出班表
+          </Button>
+          {showExportMenu && (
+            <div
+              className="absolute left-0 top-full z-50 mt-1 min-w-[140px] rounded-lg border border-slate-200 bg-white py-1 shadow-lg"
+              role="menu"
+            >
+              {onExportCSV && (
+                <button
+                  role="menuitem"
+                  className="w-full px-3 py-1.5 text-left text-sm hover:bg-slate-50"
+                  onClick={() => {
+                    onExportCSV();
+                    setShowExportMenu(false);
+                  }}
+                >
+                  CSV (.csv)
+                </button>
+              )}
+              {onExportXLSX && (
+                <button
+                  role="menuitem"
+                  className="w-full px-3 py-1.5 text-left text-sm hover:bg-slate-50"
+                  onClick={() => {
+                    onExportXLSX();
+                    setShowExportMenu(false);
+                  }}
+                >
+                  Excel (.xlsx)
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
       <Button variant="outline" className="rounded-2xl" onClick={onReset}>
         <RotateCcw className="mr-1 h-4 w-4" />
         重置
       </Button>
-      <Button className="rounded-2xl" onClick={() => { /* no-op for Phase 1 */ }}>
+      <Button className="rounded-2xl" onClick={() => {}}>
         <Save className="mr-1 h-4 w-4" />
         儲存
       </Button>

@@ -15,6 +15,7 @@ interface SpecialAreaPanelProps {
   allCount: (areaId: string) => number;
   hiddenCount: (areaId: string) => number;
   onPersonClick?: (person: BoardPerson) => void;
+  onRemovePerson?: (personId: string) => void;
 }
 
 export const SpecialAreaPanel = memo(function SpecialAreaPanel({
@@ -22,6 +23,7 @@ export const SpecialAreaPanel = memo(function SpecialAreaPanel({
   allCount,
   hiddenCount,
   onPersonClick,
+  onRemovePerson,
 }: SpecialAreaPanelProps) {
   const renderGroup = (label: string, areas: readonly string[]) => (
     <div>
@@ -37,7 +39,7 @@ export const SpecialAreaPanel = memo(function SpecialAreaPanel({
             compact
           >
             {(peopleByArea[a] ?? []).map((p) => (
-              <PersonCard key={p.id} person={p} onClick={onPersonClick ? () => onPersonClick(p) : undefined} />
+              <PersonCard key={p.id} person={p} onClick={onPersonClick ? () => onPersonClick(p) : undefined} onRemove={onRemovePerson ? () => onRemovePerson(p.id) : undefined} />
             ))}
           </AreaBox>
         ))}

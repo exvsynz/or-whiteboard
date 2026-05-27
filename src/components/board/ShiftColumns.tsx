@@ -15,6 +15,7 @@ interface ShiftColumnsProps {
   allCount: (areaId: string) => number;
   hiddenCount: (areaId: string) => number;
   onPersonClick?: (person: BoardPerson) => void;
+  onRemovePerson?: (personId: string) => void;
 }
 
 export const ShiftColumns = memo(function ShiftColumns({
@@ -22,6 +23,7 @@ export const ShiftColumns = memo(function ShiftColumns({
   allCount,
   hiddenCount,
   onPersonClick,
+  onRemovePerson,
 }: ShiftColumnsProps) {
   const renderGroup = (label: string, areas: readonly string[]) => (
     <div>
@@ -37,7 +39,7 @@ export const ShiftColumns = memo(function ShiftColumns({
             compact
           >
             {(peopleByArea[s] ?? []).map((p) => (
-              <PersonCard key={p.id} person={p} onClick={onPersonClick ? () => onPersonClick(p) : undefined} />
+              <PersonCard key={p.id} person={p} onClick={onPersonClick ? () => onPersonClick(p) : undefined} onRemove={onRemovePerson ? () => onRemovePerson(p.id) : undefined} />
             ))}
           </AreaBox>
         ))}

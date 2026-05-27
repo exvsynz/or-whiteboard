@@ -16,12 +16,17 @@ import {
 } from "@dnd-kit/core";
 import { useBoard } from "@/hooks/useBoard";
 import { useAuthContext } from "@/components/auth";
+import {
+  useDemoPlayback,
+  generatePlaybackSteps,
+} from "@/hooks/useDemoPlayback";
 import type { BoardPerson } from "@/lib/board-constants";
 import {
   LEADER_AREA,
   FIXED_TASKS,
   ALL_AREAS,
 } from "@/lib/board-constants";
+import { exportToCSV, exportToXLSX, downloadCSV, downloadBlob } from "@/lib/board-export";
 import { PersonCard } from "./PersonCard";
 import { AreaBox } from "./AreaBox";
 import { BoardToolbar } from "./BoardToolbar";
@@ -31,6 +36,8 @@ import { SpecialAreaPanel } from "./SpecialAreaPanel";
 import { UnassignedPool } from "./UnassignedPool";
 import { SyncIndicator } from "./SyncIndicator";
 import { HistoryDrawer } from "./HistoryDrawer";
+import { ImportDialog } from "./ImportDialog";
+import { PlaybackBar } from "./PlaybackBar";
 
 const UNASSIGNED_DROP_ID = "未分派";
 
@@ -41,6 +48,8 @@ export default function Board() {
     peopleByArea,
     movePerson,
     addPerson,
+    removePerson,
+    loadPeople,
     resetBoard,
     searchFilter,
     setSearchFilter,
@@ -52,6 +61,10 @@ export default function Board() {
 
   const [activeId, setActiveId] = useState<string | null>(null);
   const [historyPerson, setHistoryPerson] = useState<BoardPerson | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [playbackSteps, setPlaybackSteps] = useState<
+    ReturnType<typeof generatePlaybackSteps>
+  >([]);
   const liveRegionRef = useRef<HTMLDivElement>(null);
 
   const sensors = useSensors(
@@ -75,6 +88,7 @@ export default function Board() {
     [activeId, peopleMap],
   );
 
+  // ---- DnD handlers ----
   const handleDragStart = useCallback(
     (event: DragStartEvent) => {
       if (!isEditor) return;
@@ -99,17 +113,14 @@ export default function Board() {
     (event: DragEndEvent) => {
       const { active, over } = event;
       setActiveId(null);
-
       if (!over) {
         announce("Drag cancelled");
         return;
       }
-
       const personId = active.id as string;
       const dropId = over.id as string;
       const targetArea = dropId === UNASSIGNED_DROP_ID ? null : dropId;
       const person = peopleMap.get(personId);
-
       if (person && person.area !== targetArea) {
         movePerson(personId, targetArea);
         announce(`Dropped ${person.name} in ${dropId}`);
@@ -125,10 +136,76 @@ export default function Board() {
     announce("Drag cancelled");
   }, [announce]);
 
+  // ---- Person actions ----
   const handlePersonClick = useCallback((person: BoardPerson) => {
     setHistoryPerson(person);
   }, []);
 
+  const handleRemovePerson = useCallback(
+    (personId: string) => {
+      if (isEditor) removePerson(personId);
+    },
+    [isEditor, removePerson],
+  );
+
+  // ---- Import / Export / Playback ----
+  const handleImport = useCallback(
+    (imported: BoardPerson[], animated: boolean) => {
+      setImportOpen(false);
+      if (animated) {
+        const unassigned = imported.map((p) => ({ ...p, area: null as string | null }));
+        loadPeople(unassigned);
+        const steps = generatePlaybackSteps(imported);
+        setPlaybackSteps(steps);
+      } else {
+        loadPeople(imported);
+      }
+    },
+    [loadPeople],
+  );
+
+  const handlePlaybackStep = useCallback(
+    (person: BoardPerson) => {
+      if (person.area !== null) {
+        movePerson(person.id, person.area);
+      }
+    },
+    [movePerson],
+  );
+
+  const handlePlaybackComplete = useCallback(() => {
+    setPlaybackSteps([]);
+  }, []);
+
+  const playback = useDemoPlayback(
+    playbackSteps,
+    handlePlaybackStep,
+    handlePlaybackComplete,
+  );
+
+  // Auto-start playback when steps are loaded
+  const prevStepsLen = useRef(0);
+  if (playbackSteps.length > 0 && prevStepsLen.current === 0) {
+    prevStepsLen.current = playbackSteps.length;
+    queueMicrotask(() => playback.play());
+  }
+  if (playbackSteps.length === 0) {
+    prevStepsLen.current = 0;
+  }
+
+  const handleExportCSV = useCallback(() => {
+    const csv = exportToCSV(people);
+    const date = new Date().toISOString().slice(0, 10);
+    downloadCSV(csv, `班表-${date}.csv`);
+  }, [people]);
+
+  const handleExportXLSX = useCallback(() => {
+    const blob = exportToXLSX(people);
+    const date = new Date().toISOString().slice(0, 10);
+    downloadBlob(blob, `班表-${date}.xlsx`);
+  }, [people]);
+
+  // ---- Hidden count computation ----
   const allPeopleByArea = useMemo(() => {
     const map: Record<string, BoardPerson[]> = {};
     for (const area of ALL_AREAS) map[area] = [];
@@ -162,6 +239,7 @@ export default function Board() {
   const handleReset = useCallback(() => {
     resetBoard();
     setSearchFilter("");
+    setPlaybackSteps([]);
   }, [resetBoard, setSearchFilter]);
 
   return (
@@ -180,12 +258,31 @@ export default function Board() {
             <SyncIndicator lastSyncedAt={lastSyncedAt} error={error} />
           </header>
 
+          {playback.isPlaying || playback.isPaused ? (
+            <PlaybackBar
+              isPlaying={playback.isPlaying}
+              isPaused={playback.isPaused}
+              progress={playback.progress}
+              total={playback.total}
+              currentPerson={playback.currentPerson}
+              onPause={playback.pause}
+              onResume={playback.resume}
+              onStop={() => {
+                playback.stop();
+                setPlaybackSteps([]);
+              }}
+            />
+          ) : null}
+
           {isEditor && (
             <BoardToolbar
               searchQuery={searchFilter}
               onSearchChange={setSearchFilter}
               onAddPerson={addPerson}
               onReset={handleReset}
+              onImportClick={() => setImportOpen(true)}
+              onExportCSV={handleExportCSV}
+              onExportXLSX={handleExportXLSX}
             />
           )}
 
@@ -205,7 +302,7 @@ export default function Board() {
             <h2 className="mb-1 text-sm font-bold text-slate-500">Leader</h2>
             <AreaBox id={LEADER_AREA} title="Leader" count={allCount(LEADER_AREA)} hiddenCount={hiddenCount(LEADER_AREA)} horizontal>
               {(peopleByArea[LEADER_AREA] ?? []).map((p) => (
-                <PersonCard key={p.id} person={p} onClick={() => handlePersonClick(p)} />
+                <PersonCard key={p.id} person={p} onClick={() => handlePersonClick(p)} onRemove={isEditor ? () => handleRemovePerson(p.id) : undefined} />
               ))}
             </AreaBox>
           </section>
@@ -217,16 +314,16 @@ export default function Board() {
                 {FIXED_TASKS.map((task) => (
                   <AreaBox key={task} id={task} title={task} count={allCount(task)} hiddenCount={hiddenCount(task)} compact>
                     {(peopleByArea[task] ?? []).map((p) => (
-                      <PersonCard key={p.id} person={p} onClick={() => handlePersonClick(p)} />
+                      <PersonCard key={p.id} person={p} onClick={() => handlePersonClick(p)} onRemove={isEditor ? () => handleRemovePerson(p.id) : undefined} />
                     ))}
                   </AreaBox>
                 ))}
               </div>
             </section>
 
-            <RoomGrid peopleByArea={peopleByArea} allCount={allCount} hiddenCount={hiddenCount} onPersonClick={handlePersonClick} />
-            <ShiftColumns peopleByArea={peopleByArea} allCount={allCount} hiddenCount={hiddenCount} onPersonClick={handlePersonClick} />
-            <SpecialAreaPanel peopleByArea={peopleByArea} allCount={allCount} hiddenCount={hiddenCount} onPersonClick={handlePersonClick} />
+            <RoomGrid peopleByArea={peopleByArea} allCount={allCount} hiddenCount={hiddenCount} onPersonClick={handlePersonClick} onRemovePerson={isEditor ? handleRemovePerson : undefined} />
+            <ShiftColumns peopleByArea={peopleByArea} allCount={allCount} hiddenCount={hiddenCount} onPersonClick={handlePersonClick} onRemovePerson={isEditor ? handleRemovePerson : undefined} />
+            <SpecialAreaPanel peopleByArea={peopleByArea} allCount={allCount} hiddenCount={hiddenCount} onPersonClick={handlePersonClick} onRemovePerson={isEditor ? handleRemovePerson : undefined} />
           </div>
 
           <UnassignedPool
@@ -234,6 +331,7 @@ export default function Board() {
             totalUnassigned={totalUnassigned}
             hiddenUnassigned={hiddenUnassigned}
             onPersonClick={handlePersonClick}
+            onRemovePerson={isEditor ? handleRemovePerson : undefined}
           />
         </div>
       </div>
@@ -246,6 +344,7 @@ export default function Board() {
       <div ref={liveRegionRef} aria-live="polite" aria-atomic="true" className="sr-only" />
 
       <HistoryDrawer person={historyPerson} onClose={() => setHistoryPerson(null)} />
+      <ImportDialog open={importOpen} onClose={() => setImportOpen(false)} onImport={handleImport} />
     </DndContext>
   );
 }

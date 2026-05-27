@@ -23,6 +23,7 @@ export interface UseBoardReturn {
   movePerson: (personId: string, targetArea: string | null) => void;
   addPerson: (name: string) => void;
   removePerson: (personId: string) => void;
+  loadPeople: (newPeople: BoardPerson[]) => void;
   resetBoard: () => void;
   searchFilter: string;
   setSearchFilter: (query: string) => void;
@@ -230,6 +231,11 @@ export function useBoard(): UseBoardReturn {
     }
   }, []);
 
+  const loadPeople = useCallback((newPeople: BoardPerson[]) => {
+    setPeople(newPeople);
+    setError(null);
+  }, []);
+
   const resetBoard = useCallback(() => {
     clearBoard();
     setPeople(DEMO_PEOPLE);
@@ -271,6 +277,7 @@ export function useBoard(): UseBoardReturn {
     movePerson,
     addPerson,
     removePerson,
+    loadPeople,
     resetBoard,
     searchFilter,
     setSearchFilter,

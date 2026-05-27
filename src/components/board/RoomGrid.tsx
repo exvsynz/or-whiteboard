@@ -11,6 +11,7 @@ interface RoomGridProps {
   allCount: (areaId: string) => number;
   hiddenCount: (areaId: string) => number;
   onPersonClick?: (person: BoardPerson) => void;
+  onRemovePerson?: (personId: string) => void;
 }
 
 export const RoomGrid = memo(function RoomGrid({
@@ -18,6 +19,7 @@ export const RoomGrid = memo(function RoomGrid({
   allCount,
   hiddenCount,
   onPersonClick,
+  onRemovePerson,
 }: RoomGridProps) {
   return (
     <section aria-label="手術室 R1-R31">
@@ -33,7 +35,7 @@ export const RoomGrid = memo(function RoomGrid({
             compact
           >
             {(peopleByArea[room] ?? []).map((p) => (
-              <PersonCard key={p.id} person={p} onClick={onPersonClick ? () => onPersonClick(p) : undefined} />
+              <PersonCard key={p.id} person={p} onClick={onPersonClick ? () => onPersonClick(p) : undefined} onRemove={onRemovePerson ? () => onRemovePerson(p.id) : undefined} />
             ))}
           </AreaBox>
         ))}
