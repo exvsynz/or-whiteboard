@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, useMemo } from "react";
+import { useState, useCallback, useRef, useMemo, useEffect } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -242,6 +242,28 @@ export default function Board() {
     setPlaybackSteps([]);
   }, [resetBoard, setSearchFilter]);
 
+  // ---- Fit-to-screen zoom for wall displays ----
+  const [fitToScreen, setFitToScreen] = useState(false);
+  const boardRef = useRef<HTMLDivElement>(null);
+  const [zoomLevel, setZoomLevel] = useState(1);
+
+  useEffect(() => {
+    if (!fitToScreen || !boardRef.current) {
+      setZoomLevel(1);
+      return;
+    }
+    const recalc = () => {
+      if (!boardRef.current) return;
+      const { scrollWidth, scrollHeight } = boardRef.current;
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      setZoomLevel(Math.min(vw / scrollWidth, vh / scrollHeight, 1));
+    };
+    recalc();
+    window.addEventListener("resize", recalc);
+    return () => window.removeEventListener("resize", recalc);
+  }, [fitToScreen, people]);
+
   return (
     <DndContext
       sensors={isEditor ? sensors : undefined}
@@ -251,9 +273,13 @@ export default function Board() {
       onDragEnd={handleDragEnd}
       onDragCancel={handleDragCancel}
     >
-      <div className="flex h-screen flex-col bg-slate-100 p-2 text-slate-900">
-        <div className="mx-auto flex w-full max-w-[1900px] flex-1 flex-col gap-1 overflow-hidden">
-          <div className="flex flex-none items-center gap-2">
+      <div
+        ref={boardRef}
+        className="min-h-screen bg-slate-100 p-3 text-slate-900"
+        style={{ zoom: zoomLevel }}
+      >
+        <div className="mx-auto max-w-[1900px] space-y-2">
+          <div className="flex items-center gap-2">
             <h1 className="text-lg font-black tracking-tight">手術室人力白板</h1>
             <div className="flex-1" />
             <AreaBox id={LEADER_AREA} title="Leader" count={allCount(LEADER_AREA)} hiddenCount={hiddenCount(LEADER_AREA)} horizontal compact>
@@ -261,6 +287,13 @@ export default function Board() {
                 <PersonCard key={p.id} person={p} onClick={() => handlePersonClick(p)} onRemove={isEditor ? () => handleRemovePerson(p.id) : undefined} />
               ))}
             </AreaBox>
+            <button
+              onClick={() => setFitToScreen((v) => !v)}
+              className={`rounded-lg px-2 py-1 text-xs ${fitToScreen ? "bg-blue-100 text-blue-700" : "bg-slate-200 text-slate-600"}`}
+              title={fitToScreen ? "Exit fit-to-screen" : "Fit to screen"}
+            >
+              {fitToScreen ? "🔍 Fit ON" : "🔍 Fit"}
+            </button>
             <SyncIndicator lastSyncedAt={lastSyncedAt} error={error} />
           </div>
 
@@ -281,34 +314,35 @@ export default function Board() {
           ) : null}
 
           {isEditor && (
-            <div className="flex-none">
-              <BoardToolbar
-                searchQuery={searchFilter}
-                onSearchChange={setSearchFilter}
-                onAddPerson={addPerson}
-                onReset={handleReset}
-                onImportClick={() => setImportOpen(true)}
-                onExportCSV={handleExportCSV}
-                onExportXLSX={handleExportXLSX}
-              />
-            </div>
+            <BoardToolbar
+              searchQuery={searchFilter}
+              onSearchChange={setSearchFilter}
+              onAddPerson={addPerson}
+              onReset={handleReset}
+              onImportClick={() => setImportOpen(true)}
+              onExportCSV={handleExportCSV}
+              onExportXLSX={handleExportXLSX}
+            />
           )}
 
           {!isEditor && (
-            <div className="flex-none rounded-lg border border-blue-200 bg-blue-50 px-3 py-1 text-sm text-blue-700">
+            <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1 text-sm text-blue-700">
               唯讀模式 — 僅限查看
             </div>
           )}
 
           {error && (
-            <div className="flex-none rounded-lg border border-red-200 bg-red-50 px-3 py-1 text-sm text-red-600">
+            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-1 text-sm text-red-600">
               {error}
             </div>
           )}
 
-          <div className="flex min-h-0 flex-1 gap-1.5">
-            <section aria-label="左側固定任務" className="board-grid-scroll w-[200px] flex-none overflow-y-auto" style={{ touchAction: "pan-y" }}>
-              <h2 className="sticky top-0 z-10 mb-0.5 bg-slate-100 text-xs font-bold text-slate-500">左側固定任務</h2>
+          <div
+            className="grid gap-2"
+            style={{ gridTemplateColumns: "minmax(140px, 200px) 1fr minmax(200px, 260px) minmax(160px, 220px)" }}
+          >
+            <section aria-label="左側固定任務">
+              <h2 className="mb-0.5 text-xs font-bold text-slate-500">左側固定任務</h2>
               <div className="space-y-1">
                 {FIXED_TASKS.map((task) => (
                   <AreaBox key={task} id={task} title={task} count={allCount(task)} hiddenCount={hiddenCount(task)} compact>
@@ -320,18 +354,11 @@ export default function Board() {
               </div>
             </section>
 
-            <div className="board-grid-scroll min-w-0 flex-1 overflow-y-auto" style={{ touchAction: "pan-y" }}>
-              <RoomGrid peopleByArea={peopleByArea} allCount={allCount} hiddenCount={hiddenCount} onPersonClick={handlePersonClick} onRemovePerson={isEditor ? handleRemovePerson : undefined} />
-            </div>
-            <div className="board-grid-scroll w-[260px] flex-none overflow-y-auto" style={{ touchAction: "pan-y" }}>
-              <ShiftColumns peopleByArea={peopleByArea} allCount={allCount} hiddenCount={hiddenCount} onPersonClick={handlePersonClick} onRemovePerson={isEditor ? handleRemovePerson : undefined} />
-            </div>
-            <div className="board-grid-scroll w-[240px] flex-none overflow-y-auto" style={{ touchAction: "pan-y" }}>
-              <SpecialAreaPanel peopleByArea={peopleByArea} allCount={allCount} hiddenCount={hiddenCount} onPersonClick={handlePersonClick} onRemovePerson={isEditor ? handleRemovePerson : undefined} />
-            </div>
+            <RoomGrid peopleByArea={peopleByArea} allCount={allCount} hiddenCount={hiddenCount} onPersonClick={handlePersonClick} onRemovePerson={isEditor ? handleRemovePerson : undefined} />
+            <ShiftColumns peopleByArea={peopleByArea} allCount={allCount} hiddenCount={hiddenCount} onPersonClick={handlePersonClick} onRemovePerson={isEditor ? handleRemovePerson : undefined} />
+            <SpecialAreaPanel peopleByArea={peopleByArea} allCount={allCount} hiddenCount={hiddenCount} onPersonClick={handlePersonClick} onRemovePerson={isEditor ? handleRemovePerson : undefined} />
           </div>
 
-          <div className="flex-none">
           <UnassignedPool
             unassignedPeople={unassignedFiltered}
             totalUnassigned={totalUnassigned}
@@ -339,7 +366,6 @@ export default function Board() {
             onPersonClick={handlePersonClick}
             onRemovePerson={isEditor ? handleRemovePerson : undefined}
           />
-          </div>
         </div>
       </div>
 
