@@ -20,13 +20,13 @@ export const PersonCard = memo(function PersonCard({
   if (overlay) {
     return (
       <div
-        className={`rounded-xl border border-slate-300 ${person.color} px-3 py-2 text-sm shadow-lg scale-105`}
+        className={`rounded-lg border border-slate-300 ${person.color} px-2 py-1 text-xs shadow-lg scale-105`}
         role="button"
         tabIndex={0}
         aria-roledescription="draggable item"
       >
-        <div className="font-semibold text-slate-800">{person.name}</div>
-        <div className="text-xs text-slate-500">{person.role}</div>
+        <div className="truncate font-semibold text-slate-800">{person.name}</div>
+        <div className="truncate text-[10px] leading-tight text-slate-500">{person.role}</div>
       </div>
     );
   }
@@ -125,7 +125,7 @@ const DraggablePersonCard = memo(function DraggablePersonCard({
       <div
         ref={setNodeRef}
         style={style}
-        className={`rounded-xl border border-slate-300 ${person.color} px-3 py-2 text-sm shadow-sm cursor-grab motion-safe:transition-opacity ${
+        className={`max-w-full rounded-lg border border-slate-300 ${person.color} px-2 py-1 text-xs shadow-sm cursor-grab motion-safe:transition-opacity ${
           isDragging ? "opacity-30 scale-95" : ""
         }`}
         {...listeners}
@@ -138,8 +138,8 @@ const DraggablePersonCard = memo(function DraggablePersonCard({
         onKeyDown={handleKeyDown}
         onContextMenu={handleContextMenu}
       >
-        <div className="font-semibold text-slate-800">{person.name}</div>
-        <div className="text-xs text-slate-500">{person.role}</div>
+        <div className="truncate font-semibold text-slate-800">{person.name}</div>
+        <div className="truncate text-[10px] leading-tight text-slate-500">{person.role}</div>
       </div>
       {menu && onRemove && (
         <ContextMenu
