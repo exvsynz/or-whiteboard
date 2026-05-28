@@ -128,3 +128,14 @@
     @apply font-sans;
   }
 }
+
+/* Ensure page is scrollable — prevent h-full / DnD sensor / zoom interactions
+   from locking scroll on small viewports (e.g. 1280x720). */
+html {
+  height: auto;
+  overflow-y: auto;
+}
+body {
+  min-height: 100dvh;
+  overflow-y: auto;
+}

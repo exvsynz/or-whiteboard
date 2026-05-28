@@ -101,8 +101,8 @@ const DraggablePersonCard = memo(function DraggablePersonCard({
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
 
   const style: React.CSSProperties | undefined = transform
-    ? { transform: `translate(${transform.x}px, ${transform.y}px)` }
-    : undefined;
+    ? { transform: `translate(${transform.x}px, ${transform.y}px)`, touchAction: "none" }
+    : { touchAction: "pan-y" };
 
   const handleContextMenu = useCallback(
     (e: React.MouseEvent) => {
