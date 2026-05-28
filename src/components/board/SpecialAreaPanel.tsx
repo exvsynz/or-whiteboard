@@ -28,7 +28,7 @@ export const SpecialAreaPanel = memo(function SpecialAreaPanel({
   const renderGroup = (label: string, areas: readonly string[]) => (
     <div>
       <h3 className="mb-1 text-xs font-semibold text-slate-500">{label}</h3>
-      <div className="space-y-2">
+      <div className="grid grid-cols-2 gap-1">
         {areas.map((a) => (
           <AreaBox
             key={a}

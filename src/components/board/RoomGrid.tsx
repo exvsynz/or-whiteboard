@@ -24,7 +24,7 @@ export const RoomGrid = memo(function RoomGrid({
   return (
     <section aria-label="手術室 R1-R31">
       <h2 className="mb-1 text-sm font-bold text-slate-500">手術室 R1-R31</h2>
-      <div className="grid grid-cols-4 gap-1.5 2xl:grid-cols-5">
+      <div className="grid grid-cols-4 gap-1 lg:grid-cols-5 xl:grid-cols-6">
         {ROOMS.map((room) => (
           <AreaBox
             key={room}

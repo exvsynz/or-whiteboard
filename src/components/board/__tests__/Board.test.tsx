@@ -30,7 +30,6 @@ describe("Board", () => {
   it("renders all section headings", () => {
     renderBoard();
     expect(screen.getByText("手術室人力白板")).toBeInTheDocument();
-    expect(screen.getByText("Leader", { selector: "h2" })).toBeInTheDocument();
     expect(screen.getByText("左側固定任務")).toBeInTheDocument();
     expect(screen.getByText("手術室 R1-R31")).toBeInTheDocument();
     expect(screen.getByText("班別")).toBeInTheDocument();

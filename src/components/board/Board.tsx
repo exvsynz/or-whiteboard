@@ -251,12 +251,18 @@ export default function Board() {
       onDragEnd={handleDragEnd}
       onDragCancel={handleDragCancel}
     >
-      <div className="flex h-screen flex-col bg-slate-100 p-3 text-slate-900">
-        <div className="mx-auto flex w-full max-w-[1900px] flex-1 flex-col gap-1.5 overflow-hidden">
-          <header className="flex items-center justify-between rounded-2xl bg-white px-4 py-2 shadow-sm">
-            <h1 className="text-2xl font-black tracking-tight">手術室人力白板</h1>
+      <div className="flex h-screen flex-col bg-slate-100 p-2 text-slate-900">
+        <div className="mx-auto flex w-full max-w-[1900px] flex-1 flex-col gap-1 overflow-hidden">
+          <div className="flex flex-none items-center gap-2">
+            <h1 className="text-lg font-black tracking-tight">手術室人力白板</h1>
+            <div className="flex-1" />
+            <AreaBox id={LEADER_AREA} title="Leader" count={allCount(LEADER_AREA)} hiddenCount={hiddenCount(LEADER_AREA)} horizontal compact>
+              {(peopleByArea[LEADER_AREA] ?? []).map((p) => (
+                <PersonCard key={p.id} person={p} onClick={() => handlePersonClick(p)} onRemove={isEditor ? () => handleRemovePerson(p.id) : undefined} />
+              ))}
+            </AreaBox>
             <SyncIndicator lastSyncedAt={lastSyncedAt} error={error} />
-          </header>
+          </div>
 
           {playback.isPlaying || playback.isPaused ? (
             <PlaybackBar
@@ -275,42 +281,35 @@ export default function Board() {
           ) : null}
 
           {isEditor && (
-            <BoardToolbar
-              searchQuery={searchFilter}
-              onSearchChange={setSearchFilter}
-              onAddPerson={addPerson}
-              onReset={handleReset}
-              onImportClick={() => setImportOpen(true)}
-              onExportCSV={handleExportCSV}
-              onExportXLSX={handleExportXLSX}
-            />
+            <div className="flex-none">
+              <BoardToolbar
+                searchQuery={searchFilter}
+                onSearchChange={setSearchFilter}
+                onAddPerson={addPerson}
+                onReset={handleReset}
+                onImportClick={() => setImportOpen(true)}
+                onExportCSV={handleExportCSV}
+                onExportXLSX={handleExportXLSX}
+              />
+            </div>
           )}
 
           {!isEditor && (
-            <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-700">
-              唯讀模式 — 僅限查看，無法編輯人員配置
+            <div className="flex-none rounded-lg border border-blue-200 bg-blue-50 px-3 py-1 text-sm text-blue-700">
+              唯讀模式 — 僅限查看
             </div>
           )}
 
           {error && (
-            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-600">
+            <div className="flex-none rounded-lg border border-red-200 bg-red-50 px-3 py-1 text-sm text-red-600">
               {error}
             </div>
           )}
 
-          <section aria-label="Leader" className="flex-none">
-            <h2 className="mb-1 text-sm font-bold text-slate-500">Leader</h2>
-            <AreaBox id={LEADER_AREA} title="Leader" count={allCount(LEADER_AREA)} hiddenCount={hiddenCount(LEADER_AREA)} horizontal>
-              {(peopleByArea[LEADER_AREA] ?? []).map((p) => (
-                <PersonCard key={p.id} person={p} onClick={() => handlePersonClick(p)} onRemove={isEditor ? () => handleRemovePerson(p.id) : undefined} />
-              ))}
-            </AreaBox>
-          </section>
-
-          <div className="grid min-h-0 flex-1 grid-cols-1 gap-2 overflow-y-auto xl:grid-cols-[220px_1fr_280px_200px]">
-            <section aria-label="左側固定任務">
-              <h2 className="mb-1 text-sm font-bold text-slate-500">左側固定任務</h2>
-              <div className="space-y-2">
+          <div className="flex min-h-0 flex-1 gap-1.5">
+            <section aria-label="左側固定任務" className="board-grid-scroll w-[200px] flex-none overflow-y-auto" style={{ touchAction: "pan-y" }}>
+              <h2 className="sticky top-0 z-10 mb-0.5 bg-slate-100 text-xs font-bold text-slate-500">左側固定任務</h2>
+              <div className="space-y-1">
                 {FIXED_TASKS.map((task) => (
                   <AreaBox key={task} id={task} title={task} count={allCount(task)} hiddenCount={hiddenCount(task)} compact>
                     {(peopleByArea[task] ?? []).map((p) => (
@@ -321,9 +320,15 @@ export default function Board() {
               </div>
             </section>
 
-            <RoomGrid peopleByArea={peopleByArea} allCount={allCount} hiddenCount={hiddenCount} onPersonClick={handlePersonClick} onRemovePerson={isEditor ? handleRemovePerson : undefined} />
-            <ShiftColumns peopleByArea={peopleByArea} allCount={allCount} hiddenCount={hiddenCount} onPersonClick={handlePersonClick} onRemovePerson={isEditor ? handleRemovePerson : undefined} />
-            <SpecialAreaPanel peopleByArea={peopleByArea} allCount={allCount} hiddenCount={hiddenCount} onPersonClick={handlePersonClick} onRemovePerson={isEditor ? handleRemovePerson : undefined} />
+            <div className="board-grid-scroll min-w-0 flex-1 overflow-y-auto" style={{ touchAction: "pan-y" }}>
+              <RoomGrid peopleByArea={peopleByArea} allCount={allCount} hiddenCount={hiddenCount} onPersonClick={handlePersonClick} onRemovePerson={isEditor ? handleRemovePerson : undefined} />
+            </div>
+            <div className="board-grid-scroll w-[260px] flex-none overflow-y-auto" style={{ touchAction: "pan-y" }}>
+              <ShiftColumns peopleByArea={peopleByArea} allCount={allCount} hiddenCount={hiddenCount} onPersonClick={handlePersonClick} onRemovePerson={isEditor ? handleRemovePerson : undefined} />
+            </div>
+            <div className="board-grid-scroll w-[240px] flex-none overflow-y-auto" style={{ touchAction: "pan-y" }}>
+              <SpecialAreaPanel peopleByArea={peopleByArea} allCount={allCount} hiddenCount={hiddenCount} onPersonClick={handlePersonClick} onRemovePerson={isEditor ? handleRemovePerson : undefined} />
+            </div>
           </div>
 
           <div className="flex-none">

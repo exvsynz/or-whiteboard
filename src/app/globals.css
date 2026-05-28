@@ -128,3 +128,17 @@
     @apply font-sans;
   }
 }
+
+.board-grid-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.board-grid-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.board-grid-scroll::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+.board-grid-scroll::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
