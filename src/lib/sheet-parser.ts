@@ -5,9 +5,21 @@ export interface ParsedSheet {
   rows: string[][];
 }
 
+function isCSV(file: File): boolean {
+  return file.name.endsWith(".csv") || file.type === "text/csv";
+}
+
 export async function parseFile(file: File): Promise<ParsedSheet> {
-  const buffer = await file.arrayBuffer();
-  const workbook = XLSX.read(buffer, { type: "array" });
+  let workbook: XLSX.WorkBook;
+
+  if (isCSV(file)) {
+    const text = await file.text();
+    workbook = XLSX.read(text, { type: "string" });
+  } else {
+    const buffer = await file.arrayBuffer();
+    workbook = XLSX.read(buffer, { type: "array" });
+  }
+
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
   const data = XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1 });
 
