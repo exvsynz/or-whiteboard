@@ -28,7 +28,7 @@ export const ShiftColumns = memo(function ShiftColumns({
   const renderGroup = (label: string, areas: readonly string[]) => (
     <div>
       <h3 className="mb-1 text-xs font-semibold text-slate-500">{label}</h3>
-      <div className="space-y-1">
+      <div className="grid grid-cols-2 gap-1">
         {areas.map((s) => (
           <AreaBox
             key={s}
@@ -50,7 +50,7 @@ export const ShiftColumns = memo(function ShiftColumns({
   return (
     <section aria-label="班別">
       <h2 className="mb-1 text-sm font-bold text-slate-500">班別</h2>
-      <div className="space-y-2">
+      <div className="space-y-1.5">
         {renderGroup("12-20", SHIFT_12_20)}
         {renderGroup("小夜", SHIFT_EVENING)}
         {renderGroup("大夜", SHIFT_NIGHT)}
