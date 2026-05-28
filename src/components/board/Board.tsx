@@ -338,10 +338,10 @@ export default function Board() {
           )}
 
           <div
-            className="grid gap-2"
+            className="grid items-start gap-2"
             style={{ gridTemplateColumns: "minmax(140px, 200px) 1fr minmax(200px, 260px) minmax(160px, 220px)" }}
           >
-            <section aria-label="左側固定任務">
+            <section aria-label="左側固定任務" className="sticky top-2">
               <h2 className="mb-0.5 text-xs font-bold text-slate-500">左側固定任務</h2>
               <div className="space-y-1">
                 {FIXED_TASKS.map((task) => (
