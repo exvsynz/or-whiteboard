@@ -6,7 +6,7 @@ import {
   DragOverlay,
   useSensor,
   useSensors,
-  PointerSensor,
+  MouseSensor,
   KeyboardSensor,
   TouchSensor,
   closestCenter,
@@ -68,8 +68,8 @@ export default function Board() {
   const liveRegionRef = useRef<HTMLDivElement>(null);
 
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 15 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 8 } }),
+    useSensor(MouseSensor, { activationConstraint: { distance: 10 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 300, tolerance: 10 } }),
     useSensor(KeyboardSensor),
   );
 
