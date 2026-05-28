@@ -275,11 +275,11 @@ export default function Board() {
     >
       <div
         ref={boardRef}
-        className="min-h-screen bg-slate-100 p-3 text-slate-900"
-        style={{ zoom: zoomLevel }}
+        className="flex h-dvh flex-col overflow-hidden bg-slate-100 p-2 text-slate-900"
+        style={zoomLevel !== 1 ? { zoom: zoomLevel } : undefined}
       >
-        <div className="mx-auto max-w-[1900px] space-y-2">
-          <div className="flex items-center gap-2">
+        <div className="mx-auto flex w-full max-w-[1900px] flex-1 flex-col gap-1.5 overflow-hidden">
+          <div className="flex flex-none items-center gap-2">
             <h1 className="text-lg font-black tracking-tight">手術室人力白板</h1>
             <div className="flex-1" />
             <AreaBox id={LEADER_AREA} title="Leader" count={allCount(LEADER_AREA)} hiddenCount={hiddenCount(LEADER_AREA)} horizontal compact>
@@ -314,7 +314,7 @@ export default function Board() {
           ) : null}
 
           {isEditor && (
-            <BoardToolbar
+            <div className="flex-none"><BoardToolbar
               searchQuery={searchFilter}
               onSearchChange={setSearchFilter}
               onAddPerson={addPerson}
@@ -322,26 +322,26 @@ export default function Board() {
               onImportClick={() => setImportOpen(true)}
               onExportCSV={handleExportCSV}
               onExportXLSX={handleExportXLSX}
-            />
+            /></div>
           )}
 
           {!isEditor && (
-            <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1 text-sm text-blue-700">
+            <div className="flex-none rounded-lg border border-blue-200 bg-blue-50 px-3 py-1 text-sm text-blue-700">
               唯讀模式 — 僅限查看
             </div>
           )}
 
           {error && (
-            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-1 text-sm text-red-600">
+            <div className="flex-none rounded-lg border border-red-200 bg-red-50 px-3 py-1 text-sm text-red-600">
               {error}
             </div>
           )}
 
           <div
-            className="grid items-start gap-2"
+            className="grid min-h-0 flex-1 gap-2"
             style={{ gridTemplateColumns: "minmax(140px, 200px) 1fr minmax(200px, 260px) minmax(160px, 220px)" }}
           >
-            <section aria-label="左側固定任務" className="sticky top-2">
+            <section aria-label="左側固定任務" className="overflow-y-auto">
               <h2 className="mb-0.5 text-xs font-bold text-slate-500">左側固定任務</h2>
               <div className="space-y-1">
                 {FIXED_TASKS.map((task) => (
@@ -354,11 +354,18 @@ export default function Board() {
               </div>
             </section>
 
-            <RoomGrid peopleByArea={peopleByArea} allCount={allCount} hiddenCount={hiddenCount} onPersonClick={handlePersonClick} onRemovePerson={isEditor ? handleRemovePerson : undefined} />
-            <ShiftColumns peopleByArea={peopleByArea} allCount={allCount} hiddenCount={hiddenCount} onPersonClick={handlePersonClick} onRemovePerson={isEditor ? handleRemovePerson : undefined} />
-            <SpecialAreaPanel peopleByArea={peopleByArea} allCount={allCount} hiddenCount={hiddenCount} onPersonClick={handlePersonClick} onRemovePerson={isEditor ? handleRemovePerson : undefined} />
+            <div className="overflow-y-auto">
+              <RoomGrid peopleByArea={peopleByArea} allCount={allCount} hiddenCount={hiddenCount} onPersonClick={handlePersonClick} onRemovePerson={isEditor ? handleRemovePerson : undefined} />
+            </div>
+            <div className="overflow-y-auto">
+              <ShiftColumns peopleByArea={peopleByArea} allCount={allCount} hiddenCount={hiddenCount} onPersonClick={handlePersonClick} onRemovePerson={isEditor ? handleRemovePerson : undefined} />
+            </div>
+            <div className="overflow-y-auto">
+              <SpecialAreaPanel peopleByArea={peopleByArea} allCount={allCount} hiddenCount={hiddenCount} onPersonClick={handlePersonClick} onRemovePerson={isEditor ? handleRemovePerson : undefined} />
+            </div>
           </div>
 
+          <div className="flex-none">
           <UnassignedPool
             unassignedPeople={unassignedFiltered}
             totalUnassigned={totalUnassigned}
@@ -366,6 +373,7 @@ export default function Board() {
             onPersonClick={handlePersonClick}
             onRemovePerson={isEditor ? handleRemovePerson : undefined}
           />
+          </div>
         </div>
       </div>
 
