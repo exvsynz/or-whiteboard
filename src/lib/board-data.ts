@@ -58,7 +58,9 @@ export async function fetchRoster(
   const { data, error } = await client
     .from("assignments")
     .select("person_id, area_id, status, people(name, role, color)")
-    .eq("board_date", boardDate);
+    .eq("board_date", boardDate)
+    // Stable order — without it card order shuffles on every refetch.
+    .order("person_id", { ascending: true });
   if (error) throw new Error(`無法載入班表: ${error.message}`);
 
   const roster: BoardPerson[] = [];
@@ -138,7 +140,15 @@ export async function addPersonToRoster(
     area_id: null,
     board_date: boardDate,
   });
-  if (assignmentError) throw new Error(assignmentError.message);
+  if (assignmentError) {
+    // Best-effort cleanup so a failed roster add doesn't leave an orphan
+    // active person row (people has no delete policy; deactivate instead).
+    await client
+      .from("people")
+      .update({ is_active: false })
+      .eq("id", person.id);
+    throw new Error(assignmentError.message);
+  }
 
   return {
     id: person.id,

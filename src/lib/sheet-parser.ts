@@ -3,6 +3,8 @@ import * as XLSX from "xlsx";
 export interface ParsedSheet {
   headers: string[];
   rows: string[][];
+  /** 1-based ORIGINAL spreadsheet row number for each entry in rows (header = row 1). */
+  rowNumbers: number[];
   sheetNames: string[];
   activeSheet: string;
 }
@@ -55,19 +57,30 @@ export async function parseFile(
     sheetName && sheetNames.includes(sheetName) ? sheetName : sheetNames[0];
 
   if (!activeSheet) {
-    return { headers: [], rows: [], sheetNames, activeSheet: "" };
+    return { headers: [], rows: [], rowNumbers: [], sheetNames, activeSheet: "" };
   }
 
   const sheet = workbook.Sheets[activeSheet];
   const data = XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1 });
 
-  if (data.length === 0) return { headers: [], rows: [], sheetNames, activeSheet };
+  if (data.length === 0) {
+    return { headers: [], rows: [], rowNumbers: [], sheetNames, activeSheet };
+  }
 
-  const headers = data[0].map((h) => String(h ?? "").trim());
-  const rows = data
-    .slice(1)
-    .filter((row) => row.some((cell) => cell != null && String(cell).trim() !== ""))
-    .map((row) => row.map((cell) => String(cell ?? "").trim()));
+  // sheet_to_json({ header: 1 }) returns SPARSE arrays — empty cells are
+  // array holes that .map() would skip. Array.from densifies them to "".
+  const headers = Array.from(data[0], (h) => String(h ?? "").trim());
+  const rows: string[][] = [];
+  const rowNumbers: number[] = [];
+  data.slice(1).forEach((row, i) => {
+    const cells = Array.from(row, (cell) => String(cell ?? "").trim());
+    if (cells.some((cell) => cell !== "")) {
+      rows.push(cells);
+      // Original spreadsheet row number, computed BEFORE blank rows are
+      // dropped: header is row 1, so data index i is row i + 2.
+      rowNumbers.push(i + 2);
+    }
+  });
 
-  return { headers, rows, sheetNames, activeSheet };
+  return { headers, rows, rowNumbers, sheetNames, activeSheet };
 }

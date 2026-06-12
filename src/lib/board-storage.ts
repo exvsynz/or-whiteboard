@@ -1,4 +1,5 @@
 import type { BoardPerson } from "./board-constants";
+import type { AreaStatusInfo } from "./board-data";
 
 // Boards are stored per date so planning tomorrow's 班表 can't destroy
 // today's. When Supabase is configured this is only an offline fallback
@@ -68,4 +69,30 @@ export function saveBoard(boardDate: string, people: BoardPerson[]): void {
 export function clearBoard(boardDate: string): void {
   if (typeof window === "undefined") return;
   localStorage.removeItem(keyFor(boardDate));
+}
+
+// Area/room statuses are live operational state (not per-date). In demo
+// mode they live here; with Supabase they live in the area_status table.
+const AREA_STATUS_KEY = "or-whiteboard-area-status";
+
+export function loadAreaStatuses(): Map<string, AreaStatusInfo> {
+  if (typeof window === "undefined") return new Map();
+  try {
+    const raw = localStorage.getItem(AREA_STATUS_KEY);
+    if (!raw) return new Map();
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return new Map();
+    return new Map(parsed as Array<[string, AreaStatusInfo]>);
+  } catch {
+    return new Map();
+  }
+}
+
+export function saveAreaStatuses(statuses: Map<string, AreaStatusInfo>): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(AREA_STATUS_KEY, JSON.stringify([...statuses]));
+  } catch {
+    // Non-fatal: statuses still live in memory for this session.
+  }
 }

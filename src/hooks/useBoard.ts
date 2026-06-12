@@ -9,7 +9,13 @@ import {
 } from "@/lib/board-constants";
 import type { BoardPerson } from "@/lib/board-constants";
 import type { AssignmentStatus, RoomStatus } from "@/lib/database.types";
-import { loadBoard, saveBoard, clearBoard } from "@/lib/board-storage";
+import {
+  loadBoard,
+  saveBoard,
+  clearBoard,
+  loadAreaStatuses,
+  saveAreaStatuses,
+} from "@/lib/board-storage";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase-client";
 import { useDebouncedCallback } from "@/lib/use-debounce";
 import { logAuditEntry } from "@/lib/audit-client";
@@ -145,8 +151,16 @@ export function useBoard(): UseBoardReturn {
   }, [boardDate]);
 
   const pendingRef = useRef(new Map<string, PendingWrite>());
+  // Writes whose upsert is on the network right now. Kept separate from
+  // pendingRef so applyPending can overlay them — otherwise a refetch
+  // racing the upsert snaps the card back to its old area for a moment.
+  const inFlightRef = useRef(new Map<string, PendingWrite>());
   const playbackActiveRef = useRef(false);
   const saveStateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loadedKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    loadedKeyRef.current = loadedKey;
+  }, [loadedKey]);
 
   // ---- pending-write helpers ----
 
@@ -156,6 +170,7 @@ export function useBoard(): UseBoardReturn {
     pendingRef.current.delete(personId);
     clearTimeout(entry.timer);
     if (!supabase) return;
+    inFlightRef.current.set(personId, entry);
     try {
       await upsertAssignment(
         supabase,
@@ -167,15 +182,28 @@ export function useBoard(): UseBoardReturn {
       setError(null);
     } catch (err) {
       // Roll back ONLY this person — restoring a whole-board snapshot
-      // would wipe unrelated edits made in the meantime.
-      setPeople((prev) =>
-        prev.map((p) =>
-          p.id === personId ? { ...p, area: entry.prevArea } : p,
-        ),
-      );
+      // would wipe unrelated edits made in the meantime. Guard against:
+      // the board having switched dates (person ids are global, so the
+      // rollback would move their card on the WRONG date's board), and a
+      // newer local move (only revert if still at this write's target).
+      if (boardDateRef.current === entry.boardDate) {
+        setPeople((prev) =>
+          prev.map((p) =>
+            p.id === personId && p.area === entry.targetArea
+              ? { ...p, area: entry.prevArea }
+              : p,
+          ),
+        );
+      }
       setError(
         `移動失敗: ${err instanceof Error ? err.message : String(err)}`,
       );
+    } finally {
+      // A newer enqueue for the same person may have landed while this
+      // write was in flight — only clear our own entry.
+      if (inFlightRef.current.get(personId) === entry) {
+        inFlightRef.current.delete(personId);
+      }
     }
   }, []);
 
@@ -188,8 +216,13 @@ export function useBoard(): UseBoardReturn {
     (personId: string, prevArea: string | null, targetArea: string | null) => {
       const existing = pendingRef.current.get(personId);
       if (existing) clearTimeout(existing.timer);
+      // Anchor the rollback to the last server-confirmed area: an earlier
+      // pending/in-flight entry's prevArea wins over the current optimistic
+      // position.
+      const anchor =
+        existing ?? inFlightRef.current.get(personId) ?? undefined;
       pendingRef.current.set(personId, {
-        prevArea: existing ? existing.prevArea : prevArea,
+        prevArea: anchor ? anchor.prevArea : prevArea,
         targetArea,
         boardDate: boardDateRef.current,
         timer: setTimeout(() => void flushWrite(personId), WRITE_DEBOUNCE_MS),
@@ -198,12 +231,14 @@ export function useBoard(): UseBoardReturn {
     [flushWrite],
   );
 
-  /** Overlay optimistic positions of in-flight writes onto a fetched roster. */
+  /** Overlay optimistic positions of pending and in-flight writes onto a
+   *  fetched roster (pending is newer, so it wins). */
   const applyPending = useCallback((roster: BoardPerson[]): BoardPerson[] => {
     const pending = pendingRef.current;
-    if (pending.size === 0) return roster;
+    const inFlight = inFlightRef.current;
+    if (pending.size === 0 && inFlight.size === 0) return roster;
     return roster.map((p) => {
-      const pw = pending.get(p.id);
+      const pw = pending.get(p.id) ?? inFlight.get(p.id);
       return pw ? { ...p, area: pw.targetArea } : p;
     });
   }, []);
@@ -219,13 +254,16 @@ export function useBoard(): UseBoardReturn {
       if (cancelled) return;
       if (!isSupabaseConfigured || !supabase) {
         const stored = loadBoard(boardDate);
-        if (stored && stored.people.length > 0) {
+        if (stored) {
+          // A stored board wins even when empty — a deliberately cleared
+          // roster must not resurrect the demo people on reload.
           setPeople(stored.people);
         } else if (boardDate === localDateString()) {
           setPeople(DEMO_PEOPLE);
         } else {
           setPeople([]);
         }
+        setAreaStatuses(loadAreaStatuses());
       } else {
         try {
           const [roster, statuses] = await Promise.all([
@@ -262,12 +300,17 @@ export function useBoard(): UseBoardReturn {
   const refetch = useCallback(async (): Promise<void> => {
     if (!isSupabaseConfigured || !supabase) return;
     if (playbackActiveRef.current) return;
+    const date = boardDateRef.current;
     try {
       const [roster, statuses] = await Promise.all([
-        fetchRoster(supabase, boardDateRef.current),
+        fetchRoster(supabase, date),
         fetchAreaStatuses(supabase),
       ]);
       if (playbackActiveRef.current) return;
+      // The user may have switched dates while this was on the network —
+      // landing the stale roster would display (and cache) date A's board
+      // under date B.
+      if (boardDateRef.current !== date) return;
       setPeople(applyPending(roster));
       setAreaStatuses(statuses);
       setLastSyncedAt(new Date());
@@ -289,6 +332,9 @@ export function useBoard(): UseBoardReturn {
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase) return;
     const client = supabase;
+    // removeChannel fires the subscribe callback with CLOSED during
+    // cleanup — without this flag every date switch flashes 連線中斷.
+    let active = true;
 
     const channel = client
       .channel(`board-${boardDate}`)
@@ -313,6 +359,7 @@ export function useBoard(): UseBoardReturn {
         scheduleRefetch,
       )
       .subscribe((status) => {
+        if (!active) return;
         if (status === "SUBSCRIBED") {
           setConnectionStatus("connected");
           // Catch up on anything missed while the channel was down.
@@ -336,6 +383,7 @@ export function useBoard(): UseBoardReturn {
     const poll = setInterval(scheduleRefetch, KIOSK_POLL_MS);
 
     return () => {
+      active = false;
       void client.removeChannel(channel);
       window.removeEventListener("online", onOnline);
       document.removeEventListener("visibilitychange", onVisible);
@@ -379,7 +427,13 @@ export function useBoard(): UseBoardReturn {
 
   const setBoardDate = useCallback(
     (date: string) => {
-      // Settle the old date's writes before switching context.
+      // Settle the old date's writes before switching context — including
+      // the localStorage cache: the 500ms debounced save would otherwise
+      // be cancelled by the new date's first save and silently drop the
+      // last edit.
+      if (loadedKeyRef.current === boardDateRef.current) {
+        saveBoard(boardDateRef.current, peopleRef.current);
+      }
       void flushAllWrites();
       setBoardDateState(date);
     },
@@ -427,7 +481,11 @@ export function useBoard(): UseBoardReturn {
     if (isSupabaseConfigured && supabase) {
       addPersonToRoster(supabase, name, "未設定", color, boardDateRef.current)
         .then((person) => {
-          setPeople((prev) => [...prev, person]);
+          // The realtime echo of the insert may have refetched the roster
+          // (already containing this person) before we append.
+          setPeople((prev) =>
+            prev.some((p) => p.id === person.id) ? prev : [...prev, person],
+          );
           setLastSyncedAt(new Date());
         })
         .catch((err: unknown) => {
@@ -550,14 +608,21 @@ export function useBoard(): UseBoardReturn {
       return;
     }
     clearBoard(boardDateRef.current);
-    setPeople(DEMO_PEOPLE);
+    // Demo roster belongs to today only — resetting another date clears it.
+    setPeople(
+      boardDateRef.current === localDateString() ? DEMO_PEOPLE : [],
+    );
     setError(null);
     setLastSyncedAt(null);
   }, []);
 
   const saveNow = useCallback(async (): Promise<void> => {
     setSaveState("saving");
-    saveBoard(boardDateRef.current, peopleRef.current);
+    // Same guard as the debounced save: never write a roster that belongs
+    // to a different (still-loading) date under this date's cache key.
+    if (loadedKeyRef.current === boardDateRef.current) {
+      saveBoard(boardDateRef.current, peopleRef.current);
+    }
     await flushAllWrites();
     setSaveState("saved");
     if (saveStateTimerRef.current) clearTimeout(saveStateTimerRef.current);
@@ -581,25 +646,26 @@ export function useBoard(): UseBoardReturn {
   const updateAreaStatus = useCallback(
     (areaName: string, status: RoomStatus, note: string) => {
       const prev = areaStatuses.get(areaName);
-      setAreaStatuses((current) => {
-        const next = new Map(current);
-        next.set(areaName, { status, note });
-        return next;
-      });
+      const next = new Map(areaStatuses);
+      next.set(areaName, { status, note });
+      setAreaStatuses(next);
       if (isSupabaseConfigured && supabase) {
         persistAreaStatus(supabase, areaName, status, note).catch(
           (err: unknown) => {
             setAreaStatuses((current) => {
-              const next = new Map(current);
-              if (prev) next.set(areaName, prev);
-              else next.delete(areaName);
-              return next;
+              const reverted = new Map(current);
+              if (prev) reverted.set(areaName, prev);
+              else reverted.delete(areaName);
+              return reverted;
             });
             setError(
               `區域狀態更新失敗: ${err instanceof Error ? err.message : String(err)}`,
             );
           },
         );
+      } else {
+        // Demo mode: statuses would otherwise vanish on reload.
+        saveAreaStatuses(next);
       }
     },
     [areaStatuses],

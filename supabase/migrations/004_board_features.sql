@@ -91,8 +91,11 @@ BEGIN
       OFFSET v_occurrence - 1 LIMIT 1;
 
     IF v_person_id IS NULL THEN
-      INSERT INTO people (name, role, color)
-      VALUES (v_name, coalesce(v_role, '未設定'), coalesce(v_color, 'bg-amber-100'))
+      -- clock_timestamp(): now() is transaction-fixed, so two same-named
+      -- people created in ONE import would tie on created_at and the
+      -- occurrence-N ordering would fall back to random UUIDs.
+      INSERT INTO people (name, role, color, created_at)
+      VALUES (v_name, coalesce(v_role, '未設定'), coalesce(v_color, 'bg-amber-100'), clock_timestamp())
       RETURNING id INTO v_person_id;
     ELSE
       UPDATE people
@@ -108,7 +111,11 @@ BEGIN
     INSERT INTO assignments (person_id, area_id, board_date)
     VALUES (v_person_id, v_area_id, p_board_date)
     ON CONFLICT (person_id, board_date)
-      DO UPDATE SET area_id = EXCLUDED.area_id;
+      -- A fresh import resets duty status; without this, a conflicting
+      -- row kept its old break/relief while fresh rows got 'assigned',
+      -- and the client (which adopts everyone as 'assigned') disagreed
+      -- with the DB until the next refetch.
+      DO UPDATE SET area_id = EXCLUDED.area_id, status = 'assigned';
 
     v_keep := array_append(v_keep, v_person_id);
     v_result := v_result || jsonb_build_array(jsonb_build_object(
@@ -116,7 +123,10 @@ BEGIN
       'name', v_name,
       'role', coalesce(v_role, '未設定'),
       'color', coalesce(v_color, 'bg-amber-100'),
-      'area', v_area_name
+      -- Echo NULL when the area name did not resolve — echoing the raw
+      -- name back would make the client adopt a position the server
+      -- never stored.
+      'area', CASE WHEN v_area_id IS NULL THEN NULL ELSE v_area_name END
     ));
   END LOOP;
 

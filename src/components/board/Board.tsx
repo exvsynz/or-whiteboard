@@ -333,17 +333,33 @@ export default function Board() {
   const boardRef = useRef<HTMLDivElement>(null);
   const [zoomLevel, setZoomLevel] = useState(1);
 
+  const toggleFitToScreen = useCallback(() => {
+    setFitToScreen((v) => !v);
+    // Reset on either direction: turning off restores 1:1, turning on
+    // starts from neutral before the effect measures.
+    setZoomLevel(1);
+  }, []);
+
   useEffect(() => {
-    if (!fitToScreen || !boardRef.current) {
-      setZoomLevel(1);
-      return;
-    }
+    if (!fitToScreen) return;
     // The board root clips overflow, so measuring it is useless (its
-    // scroll size equals its client size — the old no-op bug). Measure the
-    // scrollable columns instead and shrink until none overflows.
+    // scroll size equals its client size — the old no-op bug). Measure at
+    // neutral zoom by temporarily clearing the inline scale, reading the
+    // scrollable columns, and restoring — all synchronously within one
+    // frame, so nothing paints in between. Measuring fresh each time also
+    // fixes the old one-way ratchet: content shrinking or the window
+    // growing scales the board back up.
     const recalc = () => {
       const root = boardRef.current;
       if (!root) return;
+      const prev = {
+        zoom: root.style.zoom,
+        height: root.style.height,
+        width: root.style.width,
+      };
+      root.style.zoom = "1";
+      root.style.height = "";
+      root.style.width = "";
       const columns = root.querySelectorAll<HTMLElement>("[data-scroll-col]");
       let scale = 1;
       for (const col of columns) {
@@ -351,20 +367,18 @@ export default function Board() {
           scale = Math.min(scale, col.clientHeight / col.scrollHeight);
         }
       }
-      if (scale < 1) {
-        setZoomLevel((z) => {
-          const next = Math.max(0.5, z * scale);
-          return Math.abs(next - z) > 0.02 ? next : z;
-        });
-      }
+      root.style.zoom = prev.zoom;
+      root.style.height = prev.height;
+      root.style.width = prev.width;
+      setZoomLevel(Math.max(0.5, scale));
     };
-    const frame = requestAnimationFrame(recalc);
+    const raf = requestAnimationFrame(recalc);
     window.addEventListener("resize", recalc);
     return () => {
-      cancelAnimationFrame(frame);
+      cancelAnimationFrame(raf);
       window.removeEventListener("resize", recalc);
     };
-  }, [fitToScreen, people, zoomLevel]);
+  }, [fitToScreen, people]);
 
   const today = localDateString();
 
@@ -380,7 +394,18 @@ export default function Board() {
       <div
         ref={boardRef}
         className="flex h-dvh flex-col overflow-hidden bg-slate-100 p-2 text-slate-900"
-        style={zoomLevel !== 1 ? { zoom: zoomLevel } : undefined}
+        // CSS zoom scales the container AND its content equally, which
+        // leaves overflow ratios unchanged — compensating the box by
+        // 1/zoom keeps it viewport-sized so only the content shrinks.
+        style={
+          zoomLevel !== 1
+            ? {
+                zoom: zoomLevel,
+                height: `calc(100dvh / ${zoomLevel})`,
+                width: `calc(100% / ${zoomLevel})`,
+              }
+            : undefined
+        }
       >
         <div className="mx-auto flex w-full max-w-[1900px] flex-1 flex-col gap-1.5 overflow-hidden">
           <div className="flex flex-none items-center gap-2">
@@ -444,7 +469,7 @@ export default function Board() {
               ))}
             </AreaBox>
             <button
-              onClick={() => setFitToScreen((v) => !v)}
+              onClick={toggleFitToScreen}
               className={`rounded-lg px-2 py-1 text-xs ${fitToScreen ? "bg-blue-100 text-blue-700" : "bg-slate-200 text-slate-600"}`}
               title={fitToScreen ? "結束自動縮放" : "自動縮放至螢幕大小"}
             >

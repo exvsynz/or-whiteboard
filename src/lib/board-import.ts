@@ -26,20 +26,22 @@ export function autoDetectMapping(headers: string[]): ColumnMapping {
   const rolePatterns = ["角色", "role", "職稱", "職位", "班別"];
   const areaPatterns = ["位置", "area", "room", "刀房", "房間", "區域", "地點"];
 
-  function findCol(patterns: string[]): number {
+  function findCol(patterns: string[], fallback: number): number {
     for (const p of patterns) {
+      // (h ?? "") — defense in depth against sparse header arrays, where
+      // holes surface as undefined despite the string[] type.
       const idx = headers.findIndex((h) =>
-        h.toLowerCase().includes(p.toLowerCase()),
+        (h ?? "").toLowerCase().includes(p.toLowerCase()),
       );
       if (idx !== -1) return idx;
     }
-    return -1;
+    return fallback;
   }
 
   return {
-    name: Math.max(findCol(namePatterns), 0),
-    role: Math.max(findCol(rolePatterns), 1),
-    area: Math.max(findCol(areaPatterns), 2),
+    name: findCol(namePatterns, 0),
+    role: findCol(rolePatterns, 1),
+    area: findCol(areaPatterns, 2),
   };
 }
 
@@ -74,9 +76,19 @@ export function normalizeAreaName(raw: string): string | null {
   return NORMALIZED_AREA_LOOKUP.get(normalizeAreaKey(trimmed)) ?? null;
 }
 
+/**
+ * Strip the formula-injection guard apostrophe added by exportToCSV
+ * (CWE-1236): exactly ONE leading `'` and only when followed by a formula
+ * trigger char, so legitimate values like "'normal" survive untouched.
+ */
+function stripFormulaGuard(value: string): string {
+  return value.replace(/^'(?=[=+\-@])/, "");
+}
+
 export function mapRowsToPeople(
   rows: string[][],
   mapping: ColumnMapping,
+  rowNumbers?: number[],
 ): ImportResult {
   let colorIdx = 0;
   const people: BoardPerson[] = [];
@@ -85,16 +97,22 @@ export function mapRowsToPeople(
   let matchedCount = 0;
 
   rows.forEach((row, i) => {
-    const name = row[mapping.name]?.trim() ?? "";
+    const name = stripFormulaGuard(row[mapping.name]?.trim() ?? "");
     if (!name) return;
 
-    const role = row[mapping.role]?.trim() || "未設定";
-    const rawArea = row[mapping.area]?.trim() ?? "";
+    const role = stripFormulaGuard(row[mapping.role]?.trim() ?? "") || "未設定";
+    const rawArea = stripFormulaGuard(row[mapping.area]?.trim() ?? "");
     const area = rawArea ? normalizeAreaName(rawArea) : null;
 
     if (rawArea && area === null) {
-      // Header is spreadsheet row 1, so data row i maps to row i + 2.
-      issues.push({ rowIndex: i + 2, name, rawArea, reason: "unknown-area" });
+      // Prefer the parser-supplied original spreadsheet row number (robust
+      // to filtered blank rows); fall back to i + 2 (header is row 1).
+      issues.push({
+        rowIndex: rowNumbers?.[i] ?? i + 2,
+        name,
+        rawArea,
+        reason: "unknown-area",
+      });
     }
     if (area !== null) matchedCount++;
     nameCounts.set(name, (nameCounts.get(name) ?? 0) + 1);

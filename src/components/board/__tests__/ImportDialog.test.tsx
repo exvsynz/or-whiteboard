@@ -11,7 +11,10 @@ vi.mock("@/lib/sheet-parser", () => ({
   parseFile: mocks.parseFile,
 }));
 
-vi.mock("@/lib/board-import", () => ({
+// Keep the real normalizeAreaName — the preview must use the same
+// normalization as the actual import (r01 → R1).
+vi.mock("@/lib/board-import", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/board-import")>()),
   autoDetectMapping: mocks.autoDetectMapping,
   mapRowsToPeople: mocks.mapRowsToPeople,
 }));
@@ -24,6 +27,7 @@ const singleSheet = {
     ["王小明", "護理師", "R1"],
     ["林怡君", "護理師", "外站"],
   ],
+  rowNumbers: [2, 3],
   sheetNames: ["Sheet1"],
   activeSheet: "Sheet1",
 };
@@ -34,7 +38,8 @@ const defaultResult = {
     { id: "p2", name: "林怡君", role: "護理師", color: "bg-sky-100", area: null },
   ],
   issues: [
-    { rowIndex: 1, name: "林怡君", rawArea: "外站", reason: "unknown-area" },
+    // rowIndex is ALREADY the 1-based spreadsheet row (header = row 1).
+    { rowIndex: 3, name: "林怡君", rawArea: "外站", reason: "unknown-area" },
   ],
   duplicateNames: [],
   matchedCount: 1,
@@ -156,11 +161,14 @@ describe("ImportDialog", () => {
     expect(summary.textContent?.replace(/\s+/g, "")).toBe(
       "找到2人，其中1人已匹配位置",
     );
-    // Unmatched-area issue list (complete, not just the 5-row preview)
+    // Unmatched-area issue list (complete, not just the 5-row preview).
+    // rowIndex 3 IS the spreadsheet row — rendered verbatim, no off-by-one.
     expect(
       screen.getByText(/位置無法辨識（1），將列為未分派/),
     ).toBeInTheDocument();
-    expect(screen.getByText(/林怡君：位置「/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/第 3 列 林怡君：位置「外站」/),
+    ).toBeInTheDocument();
     // Duplicate-name warning
     expect(screen.getByText(/重複姓名（1）/)).toBeInTheDocument();
     // Replacement count must be visible before confirming
@@ -173,6 +181,49 @@ describe("ImportDialog", () => {
     render(<ImportDialog open onClose={() => {}} onImport={() => {}} />);
     await selectFile();
     expect(screen.queryByText(/匯入將取代/)).not.toBeInTheDocument();
+  });
+
+  it("passes the sheet's original rowNumbers through to mapRowsToPeople", async () => {
+    render(<ImportDialog open onClose={() => {}} onImport={() => {}} />);
+    await selectFile();
+    expect(mocks.mapRowsToPeople).toHaveBeenCalledWith(
+      singleSheet.rows,
+      { name: 0, role: 1, area: 2 },
+      singleSheet.rowNumbers,
+    );
+  });
+
+  it("previews areas with the same normalization as the import: r01 → R1, no warning", async () => {
+    mocks.parseFile.mockResolvedValue({
+      ...singleSheet,
+      rows: [["王小明", "護理師", "r01"]],
+      rowNumbers: [2],
+    });
+    mocks.mapRowsToPeople.mockReturnValue({
+      people: [defaultResult.people[0]],
+      issues: [],
+      duplicateNames: [],
+      matchedCount: 1,
+    });
+    render(<ImportDialog open onClose={() => {}} onImport={() => {}} />);
+    await selectFile();
+
+    // Preview shows the CANONICAL area the cell will become, matched (green)
+    expect(screen.getByText("R1")).toBeInTheDocument();
+    expect(screen.queryByText("r01")).not.toBeInTheDocument();
+    expect(screen.queryByText(/未分派/)).not.toBeInTheDocument();
+  });
+
+  it("previews truly unknown areas with the unmatched warning", async () => {
+    mocks.parseFile.mockResolvedValue({
+      ...singleSheet,
+      rows: [["林怡君", "護理師", "外站"]],
+      rowNumbers: [2],
+    });
+    render(<ImportDialog open onClose={() => {}} onImport={() => {}} />);
+    await selectFile();
+    expect(screen.getByText("外站")).toBeInTheDocument();
+    expect(screen.getByText("(未分派)")).toBeInTheDocument();
   });
 
   it("imports the mapped people via onImport and closes", async () => {

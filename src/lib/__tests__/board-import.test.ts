@@ -38,6 +38,27 @@ describe("autoDetectMapping", () => {
     expect(mapping.role).toBe(1);
     expect(mapping.area).toBe(2);
   });
+
+  it("keeps detections at low columns: ['角色','姓名','位置'] maps role=0", () => {
+    const headers = ["角色", "姓名", "位置"];
+    const mapping = autoDetectMapping(headers);
+    expect(mapping.role).toBe(0);
+    expect(mapping.name).toBe(1);
+    expect(mapping.area).toBe(2);
+  });
+
+  it("tolerates sparse header arrays (holes from empty header cells)", () => {
+    // sheet_to_json({ header: 1 }) can yield arrays with holes; findIndex
+    // visits them as undefined, which used to crash h.toLowerCase().
+    const headers = new Array<string>(3);
+    headers[0] = "姓名";
+    headers[2] = "位置";
+    expect(() => autoDetectMapping(headers)).not.toThrow();
+    const mapping = autoDetectMapping(headers);
+    expect(mapping.name).toBe(0);
+    expect(mapping.role).toBe(1); // fallback
+    expect(mapping.area).toBe(2);
+  });
 });
 
 describe("normalizeAreaName", () => {
@@ -208,6 +229,16 @@ describe("mapRowsToPeople", () => {
     expect(matchedCount).toBe(1);
   });
 
+  it("uses provided rowNumbers for issue rowIndex (survives filtered blank rows)", () => {
+    const rows = [
+      ["王小明", "護理師", "R1"], // original spreadsheet row 2
+      ["林怡君", "Leader", "R99"], // original spreadsheet row 4 — row 3 was blank
+    ];
+    const { issues } = mapRowsToPeople(rows, mapping, [2, 4]);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].rowIndex).toBe(4);
+  });
+
   it("does not report issues for skipped empty-name rows", () => {
     const rows = [
       ["", "護理師", "R99"], // empty name → dropped, no issue
@@ -250,5 +281,32 @@ describe("mapRowsToPeople", () => {
     ];
     const { matchedCount } = mapRowsToPeople(rows, mapping);
     expect(matchedCount).toBe(2);
+  });
+});
+
+describe("mapRowsToPeople — CSV formula-guard round-trip (CWE-1236)", () => {
+  const mapping = { name: 0, role: 1, area: 2 };
+
+  it("strips the export guard apostrophe from name, role, and area", () => {
+    const rows = [["'=SUM(A1)", "'+lead", "'@R1"]];
+    const { people, issues } = mapRowsToPeople(rows, mapping);
+    expect(people[0].name).toBe("=SUM(A1)");
+    expect(people[0].role).toBe("+lead");
+    // Area is unescaped BEFORE normalization; "@R1" is still unknown.
+    expect(issues).toHaveLength(1);
+    expect(issues[0].rawArea).toBe("@R1");
+  });
+
+  it("does NOT strip the apostrophe from plain values like 'normal", () => {
+    const rows = [["'normal", "'role", "R1"]];
+    const { people } = mapRowsToPeople(rows, mapping);
+    expect(people[0].name).toBe("'normal");
+    expect(people[0].role).toBe("'role");
+  });
+
+  it("round-trips the '-' placeholder: exported \"'-\" imports as \"-\"", () => {
+    const rows = [["王小明", "'-", "R1"]];
+    const { people } = mapRowsToPeople(rows, mapping);
+    expect(people[0].role).toBe("-");
   });
 });

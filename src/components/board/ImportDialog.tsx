@@ -7,10 +7,10 @@ import { parseFile, type ParsedSheet } from "@/lib/sheet-parser";
 import {
   autoDetectMapping,
   mapRowsToPeople,
+  normalizeAreaName,
   type ColumnMapping,
   type ImportResult,
 } from "@/lib/board-import";
-import { ALL_AREAS_SET } from "@/lib/board-constants";
 import type { BoardPerson } from "@/lib/board-constants";
 
 interface ImportDialogProps {
@@ -151,7 +151,7 @@ function ImportDialogContent({
   );
 
   const result: ImportResult | null = sheet
-    ? mapRowsToPeople(sheet.rows, mapping)
+    ? mapRowsToPeople(sheet.rows, mapping, sheet.rowNumbers)
     : null;
   const people = result?.people ?? [];
   const matchedCount = result?.matchedCount ?? 0;
@@ -301,8 +301,10 @@ function ImportDialogContent({
                           const name = row[mapping.name]?.trim() ?? "";
                           const role = row[mapping.role]?.trim() ?? "未設定";
                           const rawArea = row[mapping.area]?.trim() ?? "";
-                          const areaMatched =
-                            rawArea !== "" && ALL_AREAS_SET.has(rawArea);
+                          // Same normalization as the real import — show the
+                          // CANONICAL area name the cell will become.
+                          const canonicalArea =
+                            rawArea === "" ? null : normalizeAreaName(rawArea);
                           return (
                             <tr
                               key={i}
@@ -319,9 +321,9 @@ function ImportDialogContent({
                               <td className="px-3 py-2">
                                 {rawArea === "" ? (
                                   <span className="text-slate-300">-</span>
-                                ) : areaMatched ? (
+                                ) : canonicalArea !== null ? (
                                   <span className="inline-flex items-center gap-1 text-green-700">
-                                    {rawArea}
+                                    {canonicalArea}
                                     <Check className="h-3.5 w-3.5" />
                                   </span>
                                 ) : (
@@ -369,7 +371,7 @@ function ImportDialogContent({
                     <ul className="max-h-40 space-y-1 overflow-y-auto rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
                       {issues.map((issue) => (
                         <li key={`${issue.rowIndex}-${issue.name}`}>
-                          第 {issue.rowIndex + 1} 列 {issue.name}：位置「
+                          第 {issue.rowIndex} 列 {issue.name}：位置「
                           {issue.rawArea}」
                         </li>
                       ))}

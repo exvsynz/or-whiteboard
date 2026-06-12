@@ -172,6 +172,71 @@ describe("useBoard", () => {
     expect(result.current.people).toEqual([]);
   });
 
+  it("a deliberately emptied board stays empty on reload", async () => {
+    const first = await renderLoadedBoard();
+    act(() => {
+      for (const p of DEMO_PEOPLE) first.result.current.removePerson(p.id);
+    });
+    await act(async () => {
+      await first.result.current.saveNow();
+    });
+    first.unmount();
+
+    const second = await renderLoadedBoard();
+    expect(second.result.current.people).toEqual([]);
+  });
+
+  it("resetBoard on a non-today date clears instead of seeding demo people", async () => {
+    const { result } = await renderLoadedBoard();
+    act(() => {
+      result.current.setBoardDate("2099-01-01");
+    });
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+    act(() => {
+      result.current.addPerson("臨時");
+    });
+    act(() => {
+      result.current.resetBoard();
+    });
+    expect(result.current.people).toEqual([]);
+  });
+
+  it("area statuses persist across reload in demo mode", async () => {
+    const first = await renderLoadedBoard();
+    act(() => {
+      first.result.current.updateAreaStatus("R1", "surgery", "急刀");
+    });
+    first.unmount();
+
+    const second = await renderLoadedBoard();
+    expect(second.result.current.areaStatuses.get("R1")).toEqual({
+      status: "surgery",
+      note: "急刀",
+    });
+  });
+
+  it("switching date immediately after an edit does not lose the edit", async () => {
+    const first = await renderLoadedBoard();
+    act(() => {
+      first.result.current.movePerson("demo-1", "R7");
+    });
+    // Switch inside the 500ms save-debounce window — the old date must be
+    // flushed synchronously, not dropped.
+    act(() => {
+      first.result.current.setBoardDate("2099-01-01");
+    });
+    await waitFor(() => {
+      expect(first.result.current.isLoading).toBe(false);
+    });
+    first.unmount();
+
+    const second = await renderLoadedBoard();
+    const moved = second.result.current.people.find((p) => p.id === "demo-1");
+    expect(moved?.area).toBe("R7");
+  });
+
   it("boards persist per date across hook instances", async () => {
     const first = await renderLoadedBoard();
 

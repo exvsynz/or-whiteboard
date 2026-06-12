@@ -174,6 +174,7 @@ describe("parseFile — edge cases", () => {
     const parsed = await parseFile(file);
     expect(parsed.headers).toEqual([]);
     expect(parsed.rows).toEqual([]);
+    expect(parsed.rowNumbers).toEqual([]);
   });
 
   it("filters out blank rows", async () => {
@@ -181,5 +182,37 @@ describe("parseFile — edge cases", () => {
     const file = new File([csv], "班表.csv", { type: "text/csv" });
     const parsed = await parseFile(file);
     expect(parsed.rows).toHaveLength(2);
+  });
+
+  it("densifies sparse header and data cells (empty CSV header cell)", async () => {
+    // XLSX stores nothing for empty cells, so sheet_to_json({ header: 1 })
+    // returns arrays with real holes. They must come back as "" — toEqual
+    // distinguishes holes (undefined) from "", so this fails on sparse output.
+    const csv = "姓名,,位置\n王小明,,R1";
+    const file = new File([csv], "班表.csv", { type: "text/csv" });
+    const parsed = await parseFile(file);
+    expect(parsed.headers).toEqual(["姓名", "", "位置"]);
+    expect(parsed.rows[0]).toEqual(["王小明", "", "R1"]);
+  });
+});
+
+describe("parseFile — rowNumbers", () => {
+  it("reports 1-based original spreadsheet row numbers (header = row 1)", async () => {
+    const file = new File([UTF8_CSV], "班表.csv", { type: "text/csv" });
+    const parsed = await parseFile(file);
+    expect(parsed.rowNumbers).toEqual([2, 3]);
+  });
+
+  it("keeps original row numbers when interior blank rows are filtered", async () => {
+    const csv = "姓名,角色,位置\n王小明,護理師,R1\n,,\n林怡君,Leader,R99";
+    const file = new File([csv], "班表.csv", { type: "text/csv" });
+    const parsed = await parseFile(file);
+    expect(parsed.rows).toEqual([
+      ["王小明", "護理師", "R1"],
+      ["林怡君", "Leader", "R99"],
+    ]);
+    // 林怡君 sits on spreadsheet row 4 — blank row 3 was dropped from rows
+    // but must not shift her original row number.
+    expect(parsed.rowNumbers).toEqual([2, 4]);
   });
 });
