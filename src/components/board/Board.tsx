@@ -378,7 +378,8 @@ export default function Board() {
       cancelAnimationFrame(raf);
       window.removeEventListener("resize", recalc);
     };
-  }, [fitToScreen, people]);
+    // searchFilter changes column contents without changing `people`.
+  }, [fitToScreen, people, searchFilter]);
 
   const today = localDateString();
 
@@ -395,14 +396,17 @@ export default function Board() {
         ref={boardRef}
         className="flex h-dvh flex-col overflow-hidden bg-slate-100 p-2 text-slate-900"
         // CSS zoom scales the container AND its content equally, which
-        // leaves overflow ratios unchanged — compensating the box by
-        // 1/zoom keeps it viewport-sized so only the content shrinks.
+        // leaves overflow ratios unchanged — compensating the height by
+        // 1/zoom keeps the box viewport-sized so only the content shrinks.
+        // Height only: viewport units (dvh) are multiplied by zoom, but
+        // percentage widths already resolve to the full parent, so a
+        // width compensation would overshoot by 1/zoom and push the right
+        // columns off-screen.
         style={
           zoomLevel !== 1
             ? {
                 zoom: zoomLevel,
                 height: `calc(100dvh / ${zoomLevel})`,
-                width: `calc(100% / ${zoomLevel})`,
               }
             : undefined
         }

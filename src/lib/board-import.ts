@@ -80,9 +80,10 @@ export function normalizeAreaName(raw: string): string | null {
  * Strip the formula-injection guard apostrophe added by exportToCSV
  * (CWE-1236): exactly ONE leading `'` and only when followed by a formula
  * trigger char, so legitimate values like "'normal" survive untouched.
+ * The char class mirrors the export guard exactly (incl. tab/CR).
  */
-function stripFormulaGuard(value: string): string {
-  return value.replace(/^'(?=[=+\-@])/, "");
+export function stripFormulaGuard(value: string): string {
+  return value.replace(/^'(?=[=+\-@\t\r])/, "");
 }
 
 export function mapRowsToPeople(

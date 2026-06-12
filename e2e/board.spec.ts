@@ -71,6 +71,50 @@ test("room status dialog sets a status chip", async ({ page }) => {
   ).toBeVisible();
 });
 
+test("fit-to-screen shrinks overflowing columns and stays within the viewport", async ({
+  page,
+}) => {
+  // Seed an overflowing roster (30 people in one fixed-task column).
+  await page.evaluate(() => {
+    const d = new Date();
+    const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const people = Array.from({ length: 30 }, (_, i) => ({
+      id: `seed-${i}`,
+      name: `測試${i}`,
+      role: "麻醉護理師",
+      color: "bg-amber-100",
+      area: "OPD前台",
+    }));
+    localStorage.setItem(
+      `or-whiteboard-board:${date}`,
+      JSON.stringify({ savedAt: new Date().toISOString(), people }),
+    );
+  });
+  await page.reload();
+  await expect(page.getByText("測試0")).toBeVisible();
+
+  await page.getByRole("button", { name: /縮放/ }).click();
+  // recalc runs in a rAF and React commits after it.
+  await page.waitForTimeout(400);
+
+  const result = await page.evaluate(() => {
+    const cols = [
+      ...document.querySelectorAll<HTMLElement>("[data-scroll-col]"),
+    ];
+    return {
+      overflowing: cols.some((c) => c.scrollHeight > c.clientHeight + 1),
+      rightMost: Math.max(
+        ...cols.map((c) => c.getBoundingClientRect().right),
+      ),
+      viewportWidth: window.innerWidth,
+    };
+  });
+  // No column may still scroll, and nothing may be pushed off-screen
+  // (the width-compensation regression pushed columns past the right edge).
+  expect(result.overflowing).toBe(false);
+  expect(result.rightMost).toBeLessThanOrEqual(result.viewportWidth + 1);
+});
+
 test("add person lands in 未分派 and save confirms", async ({ page }) => {
   await gotoBoard(page);
   await page.getByPlaceholder("新增人名").fill("測試新人");

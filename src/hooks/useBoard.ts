@@ -178,6 +178,13 @@ export function useBoard(): UseBoardReturn {
         entry.targetArea,
         entry.boardDate,
       );
+      // This area is now server-confirmed — re-anchor any newer pending
+      // write so a later failure rolls back here, not to a pre-success
+      // position older than what the server holds.
+      const newer = pendingRef.current.get(personId);
+      if (newer && newer.boardDate === entry.boardDate) {
+        newer.prevArea = entry.targetArea;
+      }
       setLastSyncedAt(new Date());
       setError(null);
     } catch (err) {
@@ -232,14 +239,17 @@ export function useBoard(): UseBoardReturn {
   );
 
   /** Overlay optimistic positions of pending and in-flight writes onto a
-   *  fetched roster (pending is newer, so it wins). */
+   *  fetched roster (pending is newer, so it wins). Entries from another
+   *  board date are skipped — person ids are global across dates, so a
+   *  date-A write must not reposition the person's card on date B. */
   const applyPending = useCallback((roster: BoardPerson[]): BoardPerson[] => {
     const pending = pendingRef.current;
     const inFlight = inFlightRef.current;
     if (pending.size === 0 && inFlight.size === 0) return roster;
+    const date = boardDateRef.current;
     return roster.map((p) => {
       const pw = pending.get(p.id) ?? inFlight.get(p.id);
-      return pw ? { ...p, area: pw.targetArea } : p;
+      return pw && pw.boardDate === date ? { ...p, area: pw.targetArea } : p;
     });
   }, []);
 
@@ -479,8 +489,12 @@ export function useBoard(): UseBoardReturn {
   const addPerson = useCallback((name: string) => {
     const color = nextColor();
     if (isSupabaseConfigured && supabase) {
-      addPersonToRoster(supabase, name, "未設定", color, boardDateRef.current)
+      const date = boardDateRef.current;
+      addPersonToRoster(supabase, name, "未設定", color, date)
         .then((person) => {
+          // The board may have switched dates while the insert was on the
+          // network — the person belongs to the original date's roster.
+          if (boardDateRef.current !== date) return;
           // The realtime echo of the insert may have refetched the roster
           // (already containing this person) before we append.
           setPeople((prev) =>
@@ -643,12 +657,23 @@ export function useBoard(): UseBoardReturn {
     [scheduleRefetch],
   );
 
+  // Demo mode: persist statuses whenever they change — they would
+  // otherwise vanish on reload. (Effect-based so updateAreaStatus can use
+  // a functional update without losing batched changes.)
+  useEffect(() => {
+    if (!isSupabaseConfigured && loadedKey !== null) {
+      saveAreaStatuses(areaStatuses);
+    }
+  }, [areaStatuses, loadedKey]);
+
   const updateAreaStatus = useCallback(
     (areaName: string, status: RoomStatus, note: string) => {
       const prev = areaStatuses.get(areaName);
-      const next = new Map(areaStatuses);
-      next.set(areaName, { status, note });
-      setAreaStatuses(next);
+      setAreaStatuses((current) => {
+        const next = new Map(current);
+        next.set(areaName, { status, note });
+        return next;
+      });
       if (isSupabaseConfigured && supabase) {
         persistAreaStatus(supabase, areaName, status, note).catch(
           (err: unknown) => {
@@ -663,9 +688,6 @@ export function useBoard(): UseBoardReturn {
             );
           },
         );
-      } else {
-        // Demo mode: statuses would otherwise vanish on reload.
-        saveAreaStatuses(next);
       }
     },
     [areaStatuses],

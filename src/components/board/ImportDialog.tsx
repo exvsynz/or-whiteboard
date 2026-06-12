@@ -8,6 +8,7 @@ import {
   autoDetectMapping,
   mapRowsToPeople,
   normalizeAreaName,
+  stripFormulaGuard,
   type ColumnMapping,
   type ImportResult,
 } from "@/lib/board-import";
@@ -298,9 +299,19 @@ function ImportDialogContent({
                       </thead>
                       <tbody>
                         {previewRows.map((row, i) => {
-                          const name = row[mapping.name]?.trim() ?? "";
-                          const role = row[mapping.role]?.trim() ?? "未設定";
-                          const rawArea = row[mapping.area]?.trim() ?? "";
+                          // Mirror the real import exactly: the guard
+                          // apostrophe from exported CSVs is stripped, so
+                          // the preview shows what will actually import.
+                          const name = stripFormulaGuard(
+                            row[mapping.name]?.trim() ?? "",
+                          );
+                          const role =
+                            stripFormulaGuard(
+                              row[mapping.role]?.trim() ?? "",
+                            ) || "未設定";
+                          const rawArea = stripFormulaGuard(
+                            row[mapping.area]?.trim() ?? "",
+                          );
                           // Same normalization as the real import — show the
                           // CANONICAL area name the cell will become.
                           const canonicalArea =

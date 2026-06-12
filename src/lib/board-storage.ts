@@ -82,7 +82,16 @@ export function loadAreaStatuses(): Map<string, AreaStatusInfo> {
     if (!raw) return new Map();
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return new Map();
-    return new Map(parsed as Array<[string, AreaStatusInfo]>);
+    const entries = parsed.filter(
+      (e): e is [string, AreaStatusInfo] =>
+        Array.isArray(e) &&
+        typeof e[0] === "string" &&
+        e[1] !== null &&
+        typeof e[1] === "object" &&
+        typeof (e[1] as AreaStatusInfo).status === "string" &&
+        typeof (e[1] as AreaStatusInfo).note === "string",
+    );
+    return new Map(entries);
   } catch {
     return new Map();
   }
