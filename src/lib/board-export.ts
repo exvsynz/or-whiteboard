@@ -13,10 +13,20 @@ export function exportToCSV(people: BoardPerson[]): string {
 }
 
 function escapeCsvField(value: string): string {
-  if (value.includes(",") || value.includes('"') || value.includes("\n")) {
-    return `"${value.replace(/"/g, '""')}"`;
+  // Neutralize formula injection (CWE-1236): Excel treats leading
+  // = + - @ (and tab/CR variants) as formulas. Prefix with a single
+  // quote per OWASP guidance. Only the CSV path needs this — SheetJS
+  // writes typed string cells in the XLSX path.
+  const escaped = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+  if (
+    escaped.includes(",") ||
+    escaped.includes('"') ||
+    escaped.includes("\n") ||
+    escaped.includes("\r")
+  ) {
+    return `"${escaped.replace(/"/g, '""')}"`;
   }
-  return value;
+  return escaped;
 }
 
 export function exportToXLSX(people: BoardPerson[]): Blob {
@@ -31,6 +41,17 @@ export function exportToXLSX(people: BoardPerson[]): Blob {
   return new Blob([buffer], {
     type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   });
+}
+
+/**
+ * YYYY-MM-DD in LOCAL time. Replaces `new Date().toISOString().slice(0, 10)`
+ * (UTC — yields yesterday's date before 08:00 in Taiwan) for export filenames.
+ */
+export function localDateString(d: Date = new Date()): string {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 export function downloadBlob(blob: Blob, filename: string): void {
