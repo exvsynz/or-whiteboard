@@ -54,6 +54,7 @@ export const AreaBox = memo(function AreaBox({
   return (
     <div
       ref={setNodeRef}
+      data-area={id}
       className={`rounded-2xl border bg-white/90 shadow-sm motion-safe:transition-colors ${
         compact ? "min-h-[28px] p-0.5" : "min-h-[44px] p-1"
       } ${dashed ? "border-dashed border-slate-300" : "border-slate-200"} ${
