@@ -2,6 +2,8 @@
 
 import { memo } from "react";
 import { useDroppable } from "@dnd-kit/core";
+import { ROOM_STATUS_META } from "@/lib/board-constants";
+import type { AreaStatusInfo } from "@/lib/board-data";
 
 interface AreaBoxProps {
   id: string;
@@ -15,6 +17,10 @@ interface AreaBoxProps {
   horizontal?: boolean;
   /** Dashed border style (for unassigned area) */
   dashed?: boolean;
+  /** Live operational status (room lifecycle) shown as a colored chip */
+  statusInfo?: AreaStatusInfo;
+  /** Editors get a click target on the chip to change status/note */
+  onStatusEdit?: () => void;
 }
 
 export const AreaBox = memo(function AreaBox({
@@ -26,11 +32,24 @@ export const AreaBox = memo(function AreaBox({
   compact,
   horizontal,
   dashed,
+  statusInfo,
+  onStatusEdit,
 }: AreaBoxProps) {
   const { isOver, setNodeRef } = useDroppable({
     id,
     data: { type: "area", areaName: id },
   });
+
+  const statusChip =
+    statusInfo && (statusInfo.status !== "idle" || statusInfo.note) ? (
+      <span
+        className={`inline-flex max-w-[90px] items-center gap-0.5 truncate rounded-full px-1.5 text-[10px] font-semibold leading-4 ${ROOM_STATUS_META[statusInfo.status].className}`}
+        title={statusInfo.note || ROOM_STATUS_META[statusInfo.status].label}
+      >
+        {ROOM_STATUS_META[statusInfo.status].label}
+        {statusInfo.note ? `・${statusInfo.note}` : ""}
+      </span>
+    ) : null;
 
   return (
     <div
@@ -53,9 +72,25 @@ export const AreaBox = memo(function AreaBox({
         >
           {title}
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex min-w-0 items-center gap-1">
+          {onStatusEdit ? (
+            <button
+              type="button"
+              onClick={onStatusEdit}
+              aria-label={`設定 ${title} 狀態`}
+              className="flex min-w-0 items-center rounded-full hover:ring-2 hover:ring-blue-200"
+            >
+              {statusChip ?? (
+                <span className="rounded-full px-1 text-[10px] leading-4 text-slate-300 hover:text-slate-500">
+                  ⊕
+                </span>
+              )}
+            </button>
+          ) : (
+            statusChip
+          )}
           {hiddenCount != null && hiddenCount > 0 && (
-            <span className="text-xs text-slate-500">+{hiddenCount} hidden</span>
+            <span className="text-xs text-slate-500">+{hiddenCount} 隱藏</span>
           )}
           {count > 0 && (
             <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-slate-200 px-1.5 text-xs font-semibold text-slate-600">

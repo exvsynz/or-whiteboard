@@ -3,7 +3,7 @@
 import { memo, useCallback, useEffect, useRef } from "react";
 import { useAuditLog } from "@/hooks/useAuditLog";
 import type { BoardPerson } from "@/lib/board-constants";
-import { exportAuditLogCSV } from "@/lib/audit-client";
+import { downloadCSV } from "@/lib/board-export";
 import { Button } from "@/components/ui/button";
 
 interface HistoryDrawerProps {
@@ -69,16 +69,23 @@ function HistoryDrawerInner({ person, onClose }: HistoryDrawerProps) {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [person, onClose]);
 
+  // Export only the entries shown in this drawer (per-person), with a UTF-8
+  // BOM (added by downloadCSV) so Chinese renders correctly in Excel.
   const handleExport = useCallback(() => {
-    const csv = exportAuditLogCSV();
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `audit-log-${person?.name ?? "all"}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }, [person?.name]);
+    if (!person) return;
+    const headers = "Timestamp,Person,From,To,Action,User";
+    const rows = entries.map((e) =>
+      [
+        e.timestamp.toISOString(),
+        e.personName || person.name,
+        e.fromArea ?? "未分派",
+        e.toArea ?? "未分派",
+        e.actionType,
+        e.userId ?? "demo",
+      ].join(","),
+    );
+    downloadCSV([headers, ...rows].join("\n"), `audit-log-${person.name}.csv`);
+  }, [entries, person]);
 
   if (!person) return null;
 
@@ -117,10 +124,10 @@ function HistoryDrawerInner({ person, onClose }: HistoryDrawerProps) {
 
       <div className="flex-1 overflow-y-auto px-4 py-3">
         {isLoading ? (
-          <p className="text-center text-xs text-slate-500">Loading...</p>
+          <p className="text-center text-xs text-slate-500">載入中…</p>
         ) : entries.length === 0 ? (
           <p className="text-center text-xs text-slate-500">
-            No history entries yet
+            尚無歷史紀錄
           </p>
         ) : (
           <ul className="space-y-2">
@@ -143,7 +150,7 @@ function HistoryDrawerInner({ person, onClose }: HistoryDrawerProps) {
 
       <div className="border-t border-slate-200 px-4 py-3">
         <Button variant="outline" size="sm" onClick={handleExport} className="w-full">
-          Export CSV
+          匯出 CSV
         </Button>
       </div>
     </div>

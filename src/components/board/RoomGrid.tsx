@@ -6,12 +6,19 @@ import type { BoardPerson } from "@/lib/board-constants";
 import { PersonCard } from "./PersonCard";
 import { AreaBox } from "./AreaBox";
 
+import type { AreaStatusInfo } from "@/lib/board-data";
+import type { AssignmentStatus } from "@/lib/database.types";
+
 interface RoomGridProps {
   peopleByArea: Record<string, BoardPerson[]>;
   allCount: (areaId: string) => number;
   hiddenCount: (areaId: string) => number;
   onPersonClick?: (person: BoardPerson) => void;
   onRemovePerson?: (personId: string) => void;
+  areaStatuses?: Map<string, AreaStatusInfo>;
+  /** Editors: open the status/note editor for a room. */
+  onStatusEdit?: (areaName: string) => void;
+  onSetPersonStatus?: (personId: string, status: AssignmentStatus) => void;
 }
 
 export const RoomGrid = memo(function RoomGrid({
@@ -20,6 +27,9 @@ export const RoomGrid = memo(function RoomGrid({
   hiddenCount,
   onPersonClick,
   onRemovePerson,
+  areaStatuses,
+  onStatusEdit,
+  onSetPersonStatus,
 }: RoomGridProps) {
   return (
     <section aria-label="手術室 R1-R31">
@@ -33,9 +43,11 @@ export const RoomGrid = memo(function RoomGrid({
             count={allCount(room)}
             hiddenCount={hiddenCount(room)}
             compact
+            statusInfo={areaStatuses?.get(room)}
+            onStatusEdit={onStatusEdit ? () => onStatusEdit(room) : undefined}
           >
             {(peopleByArea[room] ?? []).map((p) => (
-              <PersonCard key={p.id} person={p} onClick={onPersonClick ? () => onPersonClick(p) : undefined} onRemove={onRemovePerson ? () => onRemovePerson(p.id) : undefined} />
+              <PersonCard key={p.id} person={p} onClick={onPersonClick ? () => onPersonClick(p) : undefined} onRemove={onRemovePerson ? () => onRemovePerson(p.id) : undefined} onSetStatus={onSetPersonStatus ? (s) => onSetPersonStatus(p.id, s) : undefined} />
             ))}
           </AreaBox>
         ))}

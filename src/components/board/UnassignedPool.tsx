@@ -2,6 +2,7 @@
 
 import { memo } from "react";
 import type { BoardPerson } from "@/lib/board-constants";
+import type { AssignmentStatus } from "@/lib/database.types";
 import { PersonCard } from "./PersonCard";
 import { AreaBox } from "./AreaBox";
 
@@ -11,6 +12,7 @@ interface UnassignedPoolProps {
   hiddenUnassigned: number;
   onPersonClick?: (person: BoardPerson) => void;
   onRemovePerson?: (personId: string) => void;
+  onSetPersonStatus?: (personId: string, status: AssignmentStatus) => void;
 }
 
 export const UnassignedPool = memo(function UnassignedPool({
@@ -19,6 +21,7 @@ export const UnassignedPool = memo(function UnassignedPool({
   hiddenUnassigned,
   onPersonClick,
   onRemovePerson,
+  onSetPersonStatus,
 }: UnassignedPoolProps) {
   return (
     <section aria-label="未分派">
@@ -31,7 +34,7 @@ export const UnassignedPool = memo(function UnassignedPool({
         dashed
       >
         {unassignedPeople.map((p) => (
-          <PersonCard key={p.id} person={p} onClick={onPersonClick ? () => onPersonClick(p) : undefined} onRemove={onRemovePerson ? () => onRemovePerson(p.id) : undefined} />
+          <PersonCard key={p.id} person={p} onClick={onPersonClick ? () => onPersonClick(p) : undefined} onRemove={onRemovePerson ? () => onRemovePerson(p.id) : undefined} onSetStatus={onSetPersonStatus ? (s) => onSetPersonStatus(p.id, s) : undefined} />
         ))}
       </AreaBox>
     </section>

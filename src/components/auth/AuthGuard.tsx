@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useAuthContext } from "./AuthProvider";
-import { isDemoMode } from "@/lib/supabase-client";
+import { isDemoMode, isSupabaseConfigured } from "@/lib/supabase-client";
 import { Button } from "@/components/ui/button";
 
 interface AuthGuardProps {
@@ -65,6 +65,33 @@ export function AuthGuard({ children, fallback }: AuthGuardProps) {
   const { isAuthenticated, isLoading } = useAuthContext();
 
   if (isDemoMode) return <>{children}</>;
+
+  // Misconfigured deployment: without env vars the login form could never
+  // succeed — show what's wrong instead of a dead form.
+  if (!isSupabaseConfigured) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gray-50">
+        <div className="w-full max-w-md rounded-xl border border-amber-300 bg-amber-50 p-6 text-amber-800 shadow-sm">
+          <h1 className="mb-2 text-lg font-semibold">系統尚未設定</h1>
+          <p className="text-sm leading-relaxed">
+            找不到 Supabase 連線設定。請在環境變數中設定{" "}
+            <code className="rounded bg-amber-100 px-1">
+              NEXT_PUBLIC_SUPABASE_URL
+            </code>{" "}
+            與{" "}
+            <code className="rounded bg-amber-100 px-1">
+              NEXT_PUBLIC_SUPABASE_ANON_KEY
+            </code>
+            ，或設定{" "}
+            <code className="rounded bg-amber-100 px-1">
+              NEXT_PUBLIC_DEMO_MODE=true
+            </code>{" "}
+            以示範模式執行。
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   if (isLoading) {
     return (

@@ -8,6 +8,7 @@ import {
   autoDetectMapping,
   mapRowsToPeople,
   type ColumnMapping,
+  type ImportResult,
 } from "@/lib/board-import";
 import { ALL_AREAS_SET } from "@/lib/board-constants";
 import type { BoardPerson } from "@/lib/board-constants";
@@ -16,11 +17,31 @@ interface ImportDialogProps {
   open: boolean;
   onClose: () => void;
   onImport: (people: BoardPerson[], animated: boolean) => void;
+  currentCount?: number;
 }
 
 const ACCEPTED_EXTENSIONS = [".csv", ".xlsx", ".xls"];
 
-export function ImportDialog({ open, onClose, onImport }: ImportDialogProps) {
+// All dialog state lives in ImportDialogContent, which only mounts while the
+// dialog is open — closing unmounts it, so every open starts from a fresh
+// state without any reset-in-effect.
+export function ImportDialog({ open, onClose, onImport, currentCount }: ImportDialogProps) {
+  if (!open) return null;
+  return (
+    <ImportDialogContent
+      onClose={onClose}
+      onImport={onImport}
+      currentCount={currentCount}
+    />
+  );
+}
+
+function ImportDialogContent({
+  onClose,
+  onImport,
+  currentCount,
+}: Omit<ImportDialogProps, "open">) {
+  const [file, setFile] = useState<File | null>(null);
   const [sheet, setSheet] = useState<ParsedSheet | null>(null);
   const [mapping, setMapping] = useState<ColumnMapping>({
     name: 0,
@@ -33,11 +54,12 @@ export function ImportDialog({ open, onClose, onImport }: ImportDialogProps) {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
+  // Only close on backdrop interaction when the gesture STARTED on the
+  // backdrop — releasing a drag/text-selection over it must not discard work.
+  const mouseDownOnBackdrop = useRef(false);
 
   // Focus trap + Escape handler
   useEffect(() => {
-    if (!open) return;
-
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         onClose();
@@ -70,32 +92,22 @@ export function ImportDialog({ open, onClose, onImport }: ImportDialogProps) {
     });
 
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [open, onClose]);
+  }, [onClose]);
 
-  // Reset state when dialog closes
-  useEffect(() => {
-    if (!open) {
-      setSheet(null);
-      setMapping({ name: 0, role: 1, area: 2 });
-      setAnimated(false);
-      setError(null);
-      setDragOver(false);
-    }
-  }, [open]);
-
-  const handleFile = useCallback(async (file: File) => {
+  const handleFile = useCallback(async (f: File) => {
     setError(null);
-    const ext = file.name.slice(file.name.lastIndexOf(".")).toLowerCase();
+    const ext = f.name.slice(f.name.lastIndexOf(".")).toLowerCase();
     if (!ACCEPTED_EXTENSIONS.includes(ext)) {
       setError("不支援的檔案格式，請使用 CSV 或 XLSX 檔案");
       return;
     }
     try {
-      const parsed = await parseFile(file);
+      const parsed = await parseFile(f);
       if (parsed.headers.length === 0) {
         setError("檔案為空或無法解析");
         return;
       }
+      setFile(f);
       setSheet(parsed);
       setMapping(autoDetectMapping(parsed.headers));
     } catch {
@@ -103,28 +115,48 @@ export function ImportDialog({ open, onClose, onImport }: ImportDialogProps) {
     }
   }, []);
 
+  const handleSheetChange = useCallback(
+    async (sheetName: string) => {
+      if (!file) return;
+      setError(null);
+      try {
+        const parsed = await parseFile(file, sheetName);
+        setSheet(parsed);
+        setMapping(autoDetectMapping(parsed.headers));
+      } catch {
+        setError("檔案解析失敗，請確認檔案格式正確");
+      }
+    },
+    [file],
+  );
+
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
       setDragOver(false);
-      const file = e.dataTransfer.files[0];
-      if (file) handleFile(file);
+      const dropped = e.dataTransfer.files[0];
+      if (dropped) handleFile(dropped);
     },
     [handleFile],
   );
 
   const handleFileInput = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (file) handleFile(file);
+      const selected = e.target.files?.[0];
+      if (selected) handleFile(selected);
       // Reset so same file can be re-selected
       e.target.value = "";
     },
     [handleFile],
   );
 
-  const people = sheet ? mapRowsToPeople(sheet.rows, mapping) : [];
-  const matchedAreas = people.filter((p) => p.area !== null).length;
+  const result: ImportResult | null = sheet
+    ? mapRowsToPeople(sheet.rows, mapping)
+    : null;
+  const people = result?.people ?? [];
+  const matchedCount = result?.matchedCount ?? 0;
+  const issues = result?.issues ?? [];
+  const duplicateNames = result?.duplicateNames ?? [];
   const previewRows = sheet ? sheet.rows.slice(0, 5) : [];
 
   const handleImport = () => {
@@ -133,13 +165,17 @@ export function ImportDialog({ open, onClose, onImport }: ImportDialogProps) {
     onClose();
   };
 
-  if (!open) return null;
-
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+      onMouseDown={(e) => {
+        mouseDownOnBackdrop.current = e.target === e.currentTarget;
+      }}
       onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (e.target === e.currentTarget && mouseDownOnBackdrop.current) {
+          onClose();
+        }
+        mouseDownOnBackdrop.current = false;
       }}
     >
       <div
@@ -201,6 +237,25 @@ export function ImportDialog({ open, onClose, onImport }: ImportDialogProps) {
 
           {sheet && (
             <>
+              {/* Sheet selector (multi-sheet workbooks) */}
+              {sheet.sheetNames.length > 1 && (
+                <div className="mb-4 flex items-center gap-3">
+                  <span className="w-12 text-sm text-slate-600">工作表:</span>
+                  <select
+                    value={sheet.activeSheet}
+                    onChange={(e) => handleSheetChange(e.target.value)}
+                    className="h-8 flex-1 rounded-lg border border-slate-200 bg-white px-2 text-sm text-slate-700 outline-none focus:border-slate-400"
+                    aria-label="選擇工作表"
+                  >
+                    {sheet.sheetNames.map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               {/* Column Mapping */}
               <div className="mb-4 space-y-2">
                 <h3 className="text-sm font-medium text-slate-700">
@@ -286,6 +341,43 @@ export function ImportDialog({ open, onClose, onImport }: ImportDialogProps) {
                 </div>
               )}
 
+              {/* Import report */}
+              <div className="mb-4 space-y-2">
+                <p className="text-sm text-slate-500">
+                  找到 <strong className="text-slate-800">{people.length}</strong>{" "}
+                  人，其中{" "}
+                  <strong className="text-slate-800">{matchedCount}</strong>{" "}
+                  人已匹配位置
+                </p>
+                {currentCount !== undefined && currentCount > 0 && (
+                  <p className="flex items-center gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">
+                    <AlertTriangle className="h-4 w-4 shrink-0" />
+                    匯入將取代目前白板上的 {currentCount} 人
+                  </p>
+                )}
+                {duplicateNames.length > 0 && (
+                  <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">
+                    重複姓名（{duplicateNames.length}）：
+                    {duplicateNames.join("、")}
+                  </p>
+                )}
+                {issues.length > 0 && (
+                  <div>
+                    <h3 className="mb-1 text-sm font-medium text-amber-700">
+                      位置無法辨識（{issues.length}），將列為未分派
+                    </h3>
+                    <ul className="max-h-40 space-y-1 overflow-y-auto rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                      {issues.map((issue) => (
+                        <li key={`${issue.rowIndex}-${issue.name}`}>
+                          第 {issue.rowIndex + 1} 列 {issue.name}：位置「
+                          {issue.rawArea}」
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+
               {/* Animated checkbox */}
               <label className="mb-4 flex cursor-pointer items-center gap-2 text-sm text-slate-600">
                 <input
@@ -296,14 +388,6 @@ export function ImportDialog({ open, onClose, onImport }: ImportDialogProps) {
                 />
                 動畫播放模式（逐一分配）
               </label>
-
-              {/* Summary */}
-              <p className="mb-2 text-sm text-slate-500">
-                找到 <strong className="text-slate-800">{people.length}</strong>{" "}
-                人，其中{" "}
-                <strong className="text-slate-800">{matchedAreas}</strong>{" "}
-                人已匹配位置
-              </p>
             </>
           )}
         </div>

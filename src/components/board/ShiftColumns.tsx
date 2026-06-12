@@ -7,6 +7,7 @@ import {
   SHIFT_NIGHT,
 } from "@/lib/board-constants";
 import type { BoardPerson } from "@/lib/board-constants";
+import type { AssignmentStatus } from "@/lib/database.types";
 import { PersonCard } from "./PersonCard";
 import { AreaBox } from "./AreaBox";
 
@@ -16,6 +17,7 @@ interface ShiftColumnsProps {
   hiddenCount: (areaId: string) => number;
   onPersonClick?: (person: BoardPerson) => void;
   onRemovePerson?: (personId: string) => void;
+  onSetPersonStatus?: (personId: string, status: AssignmentStatus) => void;
 }
 
 export const ShiftColumns = memo(function ShiftColumns({
@@ -24,6 +26,7 @@ export const ShiftColumns = memo(function ShiftColumns({
   hiddenCount,
   onPersonClick,
   onRemovePerson,
+  onSetPersonStatus,
 }: ShiftColumnsProps) {
   const renderGroup = (label: string, areas: readonly string[]) => (
     <div>
@@ -39,7 +42,7 @@ export const ShiftColumns = memo(function ShiftColumns({
             compact
           >
             {(peopleByArea[s] ?? []).map((p) => (
-              <PersonCard key={p.id} person={p} onClick={onPersonClick ? () => onPersonClick(p) : undefined} onRemove={onRemovePerson ? () => onRemovePerson(p.id) : undefined} />
+              <PersonCard key={p.id} person={p} onClick={onPersonClick ? () => onPersonClick(p) : undefined} onRemove={onRemovePerson ? () => onRemovePerson(p.id) : undefined} onSetStatus={onSetPersonStatus ? (s) => onSetPersonStatus(p.id, s) : undefined} />
             ))}
           </AreaBox>
         ))}

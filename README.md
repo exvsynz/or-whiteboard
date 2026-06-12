@@ -1,36 +1,85 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 手術室人力白板 (OR Staffing Whiteboard)
 
-## Getting Started
+A wall-display staffing whiteboard for a hospital anesthesia department:
+drag-and-drop assignment of nurse anesthetists across 31 ORs, fixed tasks,
+12-20/小夜/大夜 shift slots, endoscopy/health-check areas, PACU, and case
+management — with per-date boards, CSV/Excel 班表 import, room status
+tracking, break/relief marking, realtime multi-screen sync (Supabase), and a
+server-generated audit trail.
 
-First, run the development server:
+## Quick start (demo mode)
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+npm run dev        # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+With `NEXT_PUBLIC_DEMO_MODE=true` (the default in `.env.local`) the app runs
+without a backend: you are auto-signed-in as an editor and the board persists
+to `localStorage`, keyed per date.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Production mode (Supabase)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+1. Create a Supabase project, then set in `.env.local`:
 
-## Learn More
+   ```
+   NEXT_PUBLIC_SUPABASE_URL=...
+   NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+   ```
 
-To learn more about Next.js, take a look at the following resources:
+   (Remove `NEXT_PUBLIC_DEMO_MODE` or set it to anything but `true`.)
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+2. Apply migrations and seed in order:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+   ```bash
+   npx supabase db push          # applies supabase/migrations/001..004
+   # then run supabase/seed.sql in the SQL editor (areas + sample people)
+   ```
 
-## Deploy on Vercel
+3. Create users and grant roles. **Roles live in `app_metadata`** (admin-only;
+   `user_metadata` is self-service-writable and must never carry roles):
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+   ```js
+   // server-side / dashboard Admin API
+   await supabase.auth.admin.updateUserById(userId, {
+     app_metadata: { role: "editor" },   // or "viewer"
+   });
+   ```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+   Users without a role are viewers (read-only board, no toolbar).
+
+4. Wall displays sign in with a viewer account. The board auto-refetches on
+   reconnect, tab focus, realtime events, and a 60s polling safety net.
+
+### Data model
+
+- `areas` — the 67 assignable locations (seeded; names mirror
+  `src/lib/board-constants.ts`)
+- `people` — staff roster (DB-generated UUIDs are the canonical ids)
+- `assignments` — one row per person per `board_date`; `area_id NULL` =
+  on-roster but unassigned; `status` = `assigned | break | relief`
+- `area_status` — live room lifecycle (`idle/induction/surgery/cleaning/ready`)
+  plus a free-text note per area
+- `audit_log` — written **only** by `SECURITY DEFINER` triggers on
+  `assignments`, attributed to `auth.uid()`; clients cannot insert/forge rows
+- `replace_board(date, people)` — atomic 班表 import RPC (diff-style, so the
+  audit trail records real reassignments)
+
+## 班表 import format
+
+First worksheet row = headers; columns are auto-detected (姓名/name,
+角色/role/職稱, 位置/area/刀房…) and can be remapped in the dialog. Area names
+are matched mechanically (full-width→half-width, case, `R01`→`R1`); anything
+that doesn't match a known area imports as 未分派 and is listed in the
+pre-import report. CSV files may be UTF-8 (with/without BOM), UTF-16, or Big5.
+
+## Scripts
+
+| Command             | Purpose                       |
+| ------------------- | ----------------------------- |
+| `npm run dev`       | dev server                    |
+| `npm run build`     | production build              |
+| `npm run test:run`  | vitest unit/component tests   |
+| `npm run test:e2e`  | Playwright e2e                |
+| `npm run lint`      | eslint                        |
+| `npm run typecheck` | tsc --noEmit                  |

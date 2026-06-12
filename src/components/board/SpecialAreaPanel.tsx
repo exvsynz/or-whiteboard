@@ -7,6 +7,7 @@ import {
   CASE_MANAGEMENT,
 } from "@/lib/board-constants";
 import type { BoardPerson } from "@/lib/board-constants";
+import type { AssignmentStatus } from "@/lib/database.types";
 import { PersonCard } from "./PersonCard";
 import { AreaBox } from "./AreaBox";
 
@@ -16,6 +17,7 @@ interface SpecialAreaPanelProps {
   hiddenCount: (areaId: string) => number;
   onPersonClick?: (person: BoardPerson) => void;
   onRemovePerson?: (personId: string) => void;
+  onSetPersonStatus?: (personId: string, status: AssignmentStatus) => void;
 }
 
 export const SpecialAreaPanel = memo(function SpecialAreaPanel({
@@ -24,6 +26,7 @@ export const SpecialAreaPanel = memo(function SpecialAreaPanel({
   hiddenCount,
   onPersonClick,
   onRemovePerson,
+  onSetPersonStatus,
 }: SpecialAreaPanelProps) {
   const renderGroup = (label: string, areas: readonly string[]) => (
     <div>
@@ -39,7 +42,7 @@ export const SpecialAreaPanel = memo(function SpecialAreaPanel({
             compact
           >
             {(peopleByArea[a] ?? []).map((p) => (
-              <PersonCard key={p.id} person={p} onClick={onPersonClick ? () => onPersonClick(p) : undefined} onRemove={onRemovePerson ? () => onRemovePerson(p.id) : undefined} />
+              <PersonCard key={p.id} person={p} onClick={onPersonClick ? () => onPersonClick(p) : undefined} onRemove={onRemovePerson ? () => onRemovePerson(p.id) : undefined} onSetStatus={onSetPersonStatus ? (s) => onSetPersonStatus(p.id, s) : undefined} />
             ))}
           </AreaBox>
         ))}

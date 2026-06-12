@@ -1,7 +1,16 @@
 "use client";
 
-import { useState } from "react";
-import { Search, Plus, RotateCcw, Save, Upload, Download } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import {
+  Search,
+  Plus,
+  RotateCcw,
+  Save,
+  Upload,
+  Download,
+  Check,
+  LoaderCircle,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 interface BoardToolbarProps {
@@ -12,6 +21,8 @@ interface BoardToolbarProps {
   onImportClick?: () => void;
   onExportCSV?: () => void;
   onExportXLSX?: () => void;
+  onSave?: () => void;
+  saveState?: "idle" | "saving" | "saved";
 }
 
 export function BoardToolbar({
@@ -22,9 +33,30 @@ export function BoardToolbar({
   onImportClick,
   onExportCSV,
   onExportXLSX,
+  onSave,
+  saveState = "idle",
 }: BoardToolbarProps) {
   const [newName, setNewName] = useState("");
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const exportMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!showExportMenu) return;
+    const handle = (e: MouseEvent) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) {
+        setShowExportMenu(false);
+      }
+    };
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setShowExportMenu(false);
+    };
+    document.addEventListener("mousedown", handle);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handle);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [showExportMenu]);
 
   const handleAdd = () => {
     const trimmed = newName.trim();
@@ -70,7 +102,7 @@ export function BoardToolbar({
         </Button>
       )}
       {(onExportCSV || onExportXLSX) && (
-        <div className="relative">
+        <div className="relative" ref={exportMenuRef}>
           <Button
             variant="outline"
             className="rounded-2xl"
@@ -116,10 +148,30 @@ export function BoardToolbar({
         <RotateCcw className="mr-1 h-4 w-4" />
         重置
       </Button>
-      <Button className="rounded-2xl" onClick={() => {}}>
-        <Save className="mr-1 h-4 w-4" />
-        儲存
-      </Button>
+      {onSave && (
+        <Button
+          className="rounded-2xl"
+          onClick={onSave}
+          disabled={saveState === "saving"}
+        >
+          {saveState === "saving" ? (
+            <>
+              <LoaderCircle className="mr-1 h-4 w-4 animate-spin" />
+              儲存中…
+            </>
+          ) : saveState === "saved" ? (
+            <>
+              <Check className="mr-1 h-4 w-4" />
+              已儲存
+            </>
+          ) : (
+            <>
+              <Save className="mr-1 h-4 w-4" />
+              儲存
+            </>
+          )}
+        </Button>
+      )}
     </div>
   );
 }

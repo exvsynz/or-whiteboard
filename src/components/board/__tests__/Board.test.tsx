@@ -24,22 +24,25 @@ beforeEach(() => {
   vi.spyOn(crypto, "randomUUID").mockReturnValue(
     "test-new-id" as ReturnType<typeof crypto.randomUUID>,
   );
+  // Board's reset asks for confirmation; jsdom's confirm is a no-op stub.
+  vi.spyOn(window, "confirm").mockReturnValue(true);
 });
 
 describe("Board", () => {
-  it("renders all section headings", () => {
+  it("renders all section headings", async () => {
     renderBoard();
     expect(screen.getByText("手術室人力白板")).toBeInTheDocument();
-    expect(screen.getByText("左側固定任務")).toBeInTheDocument();
+    // The board body renders after the async initial load.
+    expect(await screen.findByText("左側固定任務")).toBeInTheDocument();
     expect(screen.getByText("手術室 R1-R31")).toBeInTheDocument();
     expect(screen.getByText("班別")).toBeInTheDocument();
     expect(screen.getByText("特殊區域")).toBeInTheDocument();
     expect(screen.getByText("未分派", { selector: "h2" })).toBeInTheDocument();
   });
 
-  it("renders initial demo people", () => {
+  it("renders initial demo people", async () => {
     renderBoard();
-    expect(screen.getByText("王小明")).toBeInTheDocument();
+    expect(await screen.findByText("王小明")).toBeInTheDocument();
     expect(screen.getByText("林怡君")).toBeInTheDocument();
     expect(screen.getByText("陳美玲")).toBeInTheDocument();
     expect(screen.getByText("張志宏")).toBeInTheDocument();
@@ -49,7 +52,7 @@ describe("Board", () => {
 
   it("renders sync indicator", () => {
     renderBoard();
-    expect(screen.getByText("Offline mode")).toBeInTheDocument();
+    expect(screen.getByText("離線模式")).toBeInTheDocument();
   });
 
   it("search filters people by name", async () => {

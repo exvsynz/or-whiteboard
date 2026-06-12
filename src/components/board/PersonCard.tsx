@@ -3,12 +3,28 @@
 import { memo, useState, useCallback, useEffect, useRef } from "react";
 import { useDraggable } from "@dnd-kit/core";
 import type { BoardPerson } from "@/lib/board-constants";
+import { ASSIGNMENT_STATUS_META } from "@/lib/board-constants";
+import type { AssignmentStatus } from "@/lib/database.types";
 
 interface PersonCardProps {
   person: BoardPerson;
   overlay?: boolean;
   onClick?: () => void;
   onRemove?: () => void;
+  /** Editors: mark the person 休息/代班/正常 from the context menu. */
+  onSetStatus?: (status: AssignmentStatus) => void;
+}
+
+function StatusBadge({ status }: { status?: AssignmentStatus }) {
+  if (!status || status === "assigned") return null;
+  const meta = ASSIGNMENT_STATUS_META[status];
+  return (
+    <span
+      className={`ml-1 inline-block shrink-0 rounded-full px-1 text-[9px] font-bold leading-3 ${meta.className}`}
+    >
+      {meta.label}
+    </span>
+  );
 }
 
 export const PersonCard = memo(function PersonCard({
@@ -16,6 +32,7 @@ export const PersonCard = memo(function PersonCard({
   overlay,
   onClick,
   onRemove,
+  onSetStatus,
 }: PersonCardProps) {
   if (overlay) {
     return (
@@ -25,24 +42,38 @@ export const PersonCard = memo(function PersonCard({
         tabIndex={0}
         aria-roledescription="draggable item"
       >
-        <div className="truncate font-semibold text-slate-800">{person.name}</div>
+        <div className="truncate font-semibold text-slate-800">
+          {person.name}
+          <StatusBadge status={person.status} />
+        </div>
         <div className="truncate text-[10px] leading-tight text-slate-500">{person.role}</div>
       </div>
     );
   }
 
-  return <DraggablePersonCard person={person} onClick={onClick} onRemove={onRemove} />;
+  return (
+    <DraggablePersonCard
+      person={person}
+      onClick={onClick}
+      onRemove={onRemove}
+      onSetStatus={onSetStatus}
+    />
+  );
 });
 
 function ContextMenu({
   x,
   y,
+  person,
   onRemove,
+  onSetStatus,
   onClose,
 }: {
   x: number;
   y: number;
-  onRemove: () => void;
+  person: BoardPerson;
+  onRemove?: () => void;
+  onSetStatus?: (status: AssignmentStatus) => void;
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -62,6 +93,12 @@ function ContextMenu({
     };
   }, [onClose]);
 
+  const currentStatus = person.status ?? "assigned";
+  const statusItems: Array<{ status: AssignmentStatus; label: string }> = [
+    { status: "break", label: "標記休息" },
+    { status: "relief", label: "標記代班" },
+  ];
+
   return (
     <div
       ref={ref}
@@ -69,16 +106,46 @@ function ContextMenu({
       className="fixed z-50 min-w-[120px] rounded-lg border border-slate-200 bg-white py-1 shadow-lg"
       style={{ top: y, left: x }}
     >
-      <button
-        role="menuitem"
-        className="w-full px-3 py-1.5 text-left text-sm text-red-600 hover:bg-red-50"
-        onClick={() => {
-          onRemove();
-          onClose();
-        }}
-      >
-        移除人員
-      </button>
+      {onSetStatus &&
+        statusItems.map(({ status, label }) =>
+          currentStatus === status ? (
+            <button
+              key={status}
+              role="menuitem"
+              className="w-full px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-50"
+              onClick={() => {
+                onSetStatus("assigned");
+                onClose();
+              }}
+            >
+              取消{ASSIGNMENT_STATUS_META[status].label}
+            </button>
+          ) : (
+            <button
+              key={status}
+              role="menuitem"
+              className="w-full px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-50"
+              onClick={() => {
+                onSetStatus(status);
+                onClose();
+              }}
+            >
+              {label}
+            </button>
+          ),
+        )}
+      {onRemove && (
+        <button
+          role="menuitem"
+          className="w-full px-3 py-1.5 text-left text-sm text-red-600 hover:bg-red-50"
+          onClick={() => {
+            onRemove();
+            onClose();
+          }}
+        >
+          移除人員
+        </button>
+      )}
     </div>
   );
 }
@@ -87,38 +154,51 @@ const DraggablePersonCard = memo(function DraggablePersonCard({
   person,
   onClick,
   onRemove,
+  onSetStatus,
 }: {
   person: BoardPerson;
   onClick?: () => void;
   onRemove?: () => void;
+  onSetStatus?: (status: AssignmentStatus) => void;
 }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } =
-    useDraggable({
-      id: person.id,
-      data: { type: "person", person },
-    });
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: person.id,
+    data: { type: "person", person },
+  });
 
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
 
-  const style: React.CSSProperties | undefined = transform
-    ? { transform: `translate(${transform.x}px, ${transform.y}px)`, touchAction: "none" }
+  // No translate transform here: Board renders a <DragOverlay> copy that
+  // follows the cursor, so the original stays in place as the dimmed ghost.
+  // touchAction "pan-y" when idle keeps touch scrolling working (see 80f5932).
+  const style: React.CSSProperties = isDragging
+    ? { touchAction: "none" }
     : { touchAction: "pan-y" };
 
   const handleContextMenu = useCallback(
     (e: React.MouseEvent) => {
-      if (!onRemove) return;
+      if (!onRemove && !onSetStatus) return;
       e.preventDefault();
       setMenu({ x: e.clientX, y: e.clientY });
     },
-    [onRemove],
+    [onRemove, onSetStatus],
   );
 
+  // Compose with dnd-kit's KeyboardSensor activator (delivered via
+  // {...listeners}): the sensor runs first, so Enter/Space picks the card up
+  // for keyboard dragging (it calls preventDefault when it activates). Only
+  // when no sensor claims the event do Enter/Space fall back to onClick;
+  // opening the history drawer otherwise stays a mouse/touch affordance.
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    listeners?.onKeyDown?.(e);
     if (onClick && (e.key === "Enter" || e.key === " ") && !e.defaultPrevented) {
       e.preventDefault();
       onClick();
     }
   };
+
+  const dimmed =
+    person.status === "break" ? "opacity-60 saturate-50" : "";
 
   return (
     <>
@@ -126,7 +206,7 @@ const DraggablePersonCard = memo(function DraggablePersonCard({
         ref={setNodeRef}
         style={style}
         className={`max-w-full rounded-lg border border-slate-300 ${person.color} px-2 py-1 text-xs shadow-sm cursor-grab motion-safe:transition-opacity ${
-          isDragging ? "opacity-30 scale-95" : ""
+          isDragging ? "opacity-30 scale-95" : dimmed
         }`}
         {...listeners}
         {...attributes}
@@ -138,14 +218,19 @@ const DraggablePersonCard = memo(function DraggablePersonCard({
         onKeyDown={handleKeyDown}
         onContextMenu={handleContextMenu}
       >
-        <div className="truncate font-semibold text-slate-800">{person.name}</div>
+        <div className="truncate font-semibold text-slate-800">
+          {person.name}
+          <StatusBadge status={person.status} />
+        </div>
         <div className="truncate text-[10px] leading-tight text-slate-500">{person.role}</div>
       </div>
-      {menu && onRemove && (
+      {menu && (onRemove || onSetStatus) && (
         <ContextMenu
           x={menu.x}
           y={menu.y}
+          person={person}
           onRemove={onRemove}
+          onSetStatus={onSetStatus}
           onClose={() => setMenu(null)}
         />
       )}
