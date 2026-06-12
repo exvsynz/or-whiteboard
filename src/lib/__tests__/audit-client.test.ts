@@ -103,7 +103,7 @@ describe("audit-client", () => {
     // First row: Alice, assign
     const row1 = lines[1].split(",");
     expect(row1[1]).toBe("Alice");
-    expect(row1[2]).toBe("(unassigned)");
+    expect(row1[2]).toBe("(未分派)");
     expect(row1[3]).toBe("R1");
     expect(row1[4]).toBe("assign");
     expect(row1[5]).toBe("user-1");
@@ -112,9 +112,33 @@ describe("audit-client", () => {
     const row2 = lines[2].split(",");
     expect(row2[1]).toBe("Bob");
     expect(row2[2]).toBe("R3");
-    expect(row2[3]).toBe("(unassigned)");
+    expect(row2[3]).toBe("(未分派)");
     expect(row2[4]).toBe("unassign");
     expect(row2[5]).toBe("demo");
+  });
+
+  it("exportAuditLogCSV exports only the given entries when provided", () => {
+    logAuditEntry({
+      personId: "p-1",
+      personName: "Alice",
+      fromArea: null,
+      toArea: "R1",
+      actionType: "assign",
+    });
+    logAuditEntry({
+      personId: "p-2",
+      personName: "Bob",
+      fromArea: "R3",
+      toArea: null,
+      actionType: "unassign",
+    });
+
+    const onlyBob = getAuditLogForPerson("p-2");
+    const csv = exportAuditLogCSV(onlyBob);
+    const lines = csv.split("\n");
+    expect(lines).toHaveLength(2); // header + 1 row
+    expect(lines[1]).toContain("Bob");
+    expect(csv).not.toContain("Alice");
   });
 
   it("getLocalAuditLog returns a copy (not a reference)", () => {

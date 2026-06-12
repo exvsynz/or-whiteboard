@@ -1,9 +1,13 @@
+import type { AssignmentStatus, RoomStatus } from "./database.types";
+
 export interface BoardPerson {
   id: string;
   name: string;
   role: string;
   color: string;
   area: string | null;
+  /** Duty status; absent means "assigned" (normal duty). */
+  status?: AssignmentStatus;
 }
 
 export const LEADER_AREA = "Leader";
@@ -72,6 +76,31 @@ export const ALL_AREAS = [
 ];
 
 export const ALL_AREAS_SET = new Set(ALL_AREAS);
+
+export const ROOM_STATUS_META: Record<
+  RoomStatus,
+  { label: string; className: string }
+> = {
+  idle: { label: "空房", className: "bg-slate-200 text-slate-600" },
+  induction: { label: "誘導中", className: "bg-amber-200 text-amber-800" },
+  surgery: { label: "手術中", className: "bg-red-200 text-red-800" },
+  cleaning: { label: "清潔中", className: "bg-blue-200 text-blue-800" },
+  ready: { label: "備妥", className: "bg-green-200 text-green-800" },
+};
+
+export const ROOM_STATUS_ORDER: RoomStatus[] = [
+  "idle",
+  "induction",
+  "surgery",
+  "cleaning",
+  "ready",
+];
+
+export const ASSIGNMENT_STATUS_META = {
+  assigned: { label: "", className: "" },
+  break: { label: "休息", className: "bg-amber-300 text-amber-900" },
+  relief: { label: "代班", className: "bg-violet-300 text-violet-900" },
+} as const;
 
 export const COLOR_PALETTE = [
   "bg-amber-100",

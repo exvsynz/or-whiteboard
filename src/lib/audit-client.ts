@@ -1,4 +1,3 @@
-import { supabase, isSupabaseConfigured } from "./supabase-client";
 import type { ActionType } from "./database.types";
 
 export interface AuditEntry {
@@ -11,25 +10,14 @@ export interface AuditEntry {
   timestamp: Date;
 }
 
-// In-memory log for demo mode
+// In-memory log for demo mode. When Supabase is configured the audit trail
+// is generated server-side by triggers on `assignments` (see migration
+// 003_security_hardening.sql) — clients can no longer insert audit rows,
+// which also means they can no longer forge or skip them.
 const localAuditLog: AuditEntry[] = [];
 
 export function logAuditEntry(entry: Omit<AuditEntry, "timestamp">): void {
-  const fullEntry = { ...entry, timestamp: new Date() };
-  localAuditLog.push(fullEntry);
-
-  if (isSupabaseConfigured && supabase) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (supabase.from("audit_log") as any)
-      .insert({
-        person_id: entry.personId,
-        from_area_id: entry.fromArea,
-        to_area_id: entry.toArea,
-        action_type: entry.actionType,
-        user_id: entry.userId ?? null,
-      })
-      .then(() => {}); // fire-and-forget
-  }
+  localAuditLog.push({ ...entry, timestamp: new Date() });
 }
 
 export function getLocalAuditLog(): AuditEntry[] {
@@ -44,14 +32,15 @@ export function clearLocalAuditLog(): void {
   localAuditLog.length = 0;
 }
 
-export function exportAuditLogCSV(): string {
+export function exportAuditLogCSV(entries?: AuditEntry[]): string {
+  const source = entries ?? localAuditLog;
   const headers = "Timestamp,Person,From,To,Action,User";
-  const rows = localAuditLog.map((e) =>
+  const rows = source.map((e) =>
     [
       e.timestamp.toISOString(),
       e.personName,
-      e.fromArea ?? "(unassigned)",
-      e.toArea ?? "(unassigned)",
+      e.fromArea ?? "(未分派)",
+      e.toArea ?? "(未分派)",
       e.actionType,
       e.userId ?? "demo",
     ].join(","),
