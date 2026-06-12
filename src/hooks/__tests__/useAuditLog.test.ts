@@ -1,4 +1,4 @@
-import { renderHook, act } from "@testing-library/react";
+import { renderHook, act, waitFor } from "@testing-library/react";
 import { describe, it, expect, beforeEach } from "vitest";
 import { useAuditLog } from "../useAuditLog";
 import {
@@ -17,7 +17,7 @@ describe("useAuditLog", () => {
     expect(result.current.isLoading).toBe(false);
   });
 
-  it("returns entries for a specific personId from local log", () => {
+  it("returns entries for a specific personId from local log", async () => {
     logAuditEntry({
       personId: "p-1",
       personName: "Alice",
@@ -42,11 +42,13 @@ describe("useAuditLog", () => {
 
     const { result } = renderHook(() => useAuditLog("p-1"));
 
-    expect(result.current.entries).toHaveLength(2);
+    await waitFor(() => {
+      expect(result.current.entries).toHaveLength(2);
+    });
     expect(result.current.entries.every((e) => e.personId === "p-1")).toBe(true);
   });
 
-  it("refresh re-reads the log", () => {
+  it("refresh re-reads the log", async () => {
     const { result } = renderHook(() => useAuditLog("p-1"));
     expect(result.current.entries).toHaveLength(0);
 
@@ -64,7 +66,9 @@ describe("useAuditLog", () => {
       result.current.refresh();
     });
 
-    expect(result.current.entries).toHaveLength(1);
+    await waitFor(() => {
+      expect(result.current.entries).toHaveLength(1);
+    });
     expect(result.current.entries[0].personName).toBe("Alice");
   });
 });

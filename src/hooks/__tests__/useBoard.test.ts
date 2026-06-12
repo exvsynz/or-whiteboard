@@ -1,8 +1,19 @@
-import { renderHook, act } from "@testing-library/react";
+import { renderHook, act, waitFor } from "@testing-library/react";
 import { describe, it, expect, beforeEach } from "vitest";
 import { useBoard } from "../useBoard";
 import { ALL_AREAS, DEMO_PEOPLE } from "@/lib/board-constants";
 import { clearLocalAuditLog, getLocalAuditLog } from "@/lib/audit-client";
+
+// Without Supabase env vars these tests exercise demo mode (localStorage
+// source of truth). Initial load is async (microtask), so every test
+// awaits the loaded state first.
+async function renderLoadedBoard() {
+  const rendered = renderHook(() => useBoard());
+  await waitFor(() => {
+    expect(rendered.result.current.isLoading).toBe(false);
+  });
+  return rendered;
+}
 
 describe("useBoard", () => {
   beforeEach(() => {
@@ -10,14 +21,21 @@ describe("useBoard", () => {
     clearLocalAuditLog();
   });
 
-  it("initializes with demo people when no localStorage data", () => {
-    const { result } = renderHook(() => useBoard());
+  it("initializes with demo people when no localStorage data", async () => {
+    const { result } = await renderLoadedBoard();
     expect(result.current.people).toEqual(DEMO_PEOPLE);
-    expect(result.current.isLoading).toBe(false);
+    expect(result.current.connectionStatus).toBe("local");
   });
 
-  it("movePerson updates person's area", () => {
-    const { result } = renderHook(() => useBoard());
+  it("boardDate defaults to today (local time)", async () => {
+    const { result } = await renderLoadedBoard();
+    const now = new Date();
+    const expected = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    expect(result.current.boardDate).toBe(expected);
+  });
+
+  it("movePerson updates person's area", async () => {
+    const { result } = await renderLoadedBoard();
 
     act(() => {
       result.current.movePerson("demo-1", "R2");
@@ -27,21 +45,20 @@ describe("useBoard", () => {
     expect(moved?.area).toBe("R2");
   });
 
-  it("movePerson validates target area exists (rejects invalid areas)", () => {
-    const { result } = renderHook(() => useBoard());
+  it("movePerson validates target area exists (rejects invalid areas)", async () => {
+    const { result } = await renderLoadedBoard();
 
     act(() => {
       result.current.movePerson("demo-1", "INVALID_AREA");
     });
 
-    // Person should not have moved
     const person = result.current.people.find((p) => p.id === "demo-1");
     expect(person?.area).toBe("R1");
     expect(result.current.error).toContain("無效的區域");
   });
 
-  it("addPerson creates person with UUID, '未設定' role, null area", () => {
-    const { result } = renderHook(() => useBoard());
+  it("addPerson creates person with UUID, '未設定' role, null area", async () => {
+    const { result } = await renderLoadedBoard();
     const initialLength = result.current.people.length;
 
     act(() => {
@@ -57,27 +74,82 @@ describe("useBoard", () => {
     expect(added.color).toBeTruthy();
   });
 
-  it("removePerson removes from people array", () => {
-    const { result } = renderHook(() => useBoard());
+  it("removePerson removes from people array", async () => {
+    const { result } = await renderLoadedBoard();
 
     act(() => {
       result.current.removePerson("demo-1");
     });
 
-    expect(result.current.people.find((p) => p.id === "demo-1")).toBeUndefined();
+    expect(
+      result.current.people.find((p) => p.id === "demo-1"),
+    ).toBeUndefined();
     expect(result.current.people).toHaveLength(DEMO_PEOPLE.length - 1);
   });
 
-  it("resetBoard restores demo data", () => {
-    const { result } = renderHook(() => useBoard());
+  it("setPersonStatus marks a person on break", async () => {
+    const { result } = await renderLoadedBoard();
 
-    // Modify state
+    act(() => {
+      result.current.setPersonStatus("demo-1", "break");
+    });
+
+    const person = result.current.people.find((p) => p.id === "demo-1");
+    expect(person?.status).toBe("break");
+  });
+
+  it("importPeople replaces the board", async () => {
+    const { result } = await renderLoadedBoard();
+    const imported = [
+      {
+        id: "i-1",
+        name: "匯入者",
+        role: "麻醉護理師",
+        color: "bg-blue-100",
+        area: "R3",
+      },
+    ];
+
+    await act(async () => {
+      await result.current.importPeople(imported);
+    });
+
+    expect(result.current.people).toEqual(imported);
+  });
+
+  it("importPeople with displayUnassigned shows everyone unassigned", async () => {
+    const { result } = await renderLoadedBoard();
+    const imported: import("@/lib/board-constants").BoardPerson[] = [
+      {
+        id: "i-1",
+        name: "匯入者",
+        role: "麻醉護理師",
+        color: "bg-blue-100",
+        area: "R3",
+      },
+    ];
+
+    let adopted: typeof imported = [];
+    await act(async () => {
+      adopted = await result.current.importPeople(imported, {
+        displayUnassigned: true,
+      });
+    });
+
+    // Returned roster keeps final areas (for playback steps)…
+    expect(adopted[0].area).toBe("R3");
+    // …but the displayed board starts unassigned.
+    expect(result.current.people[0].area).toBeNull();
+  });
+
+  it("resetBoard restores demo data", async () => {
+    const { result } = await renderLoadedBoard();
+
     act(() => {
       result.current.removePerson("demo-1");
       result.current.addPerson("Extra");
     });
 
-    // Reset
     act(() => {
       result.current.resetBoard();
     });
@@ -85,8 +157,39 @@ describe("useBoard", () => {
     expect(result.current.people).toEqual(DEMO_PEOPLE);
   });
 
-  it("searchFilter filters by name (case-insensitive)", () => {
-    const { result } = renderHook(() => useBoard());
+  it("setBoardDate switches to an empty board for another day", async () => {
+    const { result } = await renderLoadedBoard();
+
+    act(() => {
+      result.current.setBoardDate("2099-01-01");
+    });
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+    expect(result.current.boardDate).toBe("2099-01-01");
+    // Not today → no demo fallback, just an empty roster.
+    expect(result.current.people).toEqual([]);
+  });
+
+  it("boards persist per date across hook instances", async () => {
+    const first = await renderLoadedBoard();
+
+    act(() => {
+      first.result.current.movePerson("demo-1", "R9");
+    });
+    await act(async () => {
+      await first.result.current.saveNow();
+    });
+    first.unmount();
+
+    const second = await renderLoadedBoard();
+    const moved = second.result.current.people.find((p) => p.id === "demo-1");
+    expect(moved?.area).toBe("R9");
+  });
+
+  it("searchFilter filters by name (case-insensitive)", async () => {
+    const { result } = await renderLoadedBoard();
 
     act(() => {
       result.current.setSearchFilter("王小");
@@ -96,8 +199,8 @@ describe("useBoard", () => {
     expect(result.current.filteredPeople[0].name).toBe("王小明");
   });
 
-  it("searchFilter filters by role", () => {
-    const { result } = renderHook(() => useBoard());
+  it("searchFilter filters by role", async () => {
+    const { result } = await renderLoadedBoard();
 
     act(() => {
       result.current.setSearchFilter("leader");
@@ -107,8 +210,8 @@ describe("useBoard", () => {
     expect(result.current.filteredPeople[0].role).toBe("Leader");
   });
 
-  it("searchFilter filters by area", () => {
-    const { result } = renderHook(() => useBoard());
+  it("searchFilter filters by area", async () => {
+    const { result } = await renderLoadedBoard();
 
     act(() => {
       result.current.setSearchFilter("opd");
@@ -118,28 +221,25 @@ describe("useBoard", () => {
     expect(result.current.filteredPeople[0].area).toBe("OPD前台");
   });
 
-  it("peopleByArea groups people correctly", () => {
-    const { result } = renderHook(() => useBoard());
+  it("peopleByArea groups people correctly", async () => {
+    const { result } = await renderLoadedBoard();
 
     const r1People = result.current.peopleByArea["R1"];
     expect(r1People).toHaveLength(1);
     expect(r1People[0].id).toBe("demo-1");
   });
 
-  it("peopleByArea includes empty areas", () => {
-    const { result } = renderHook(() => useBoard());
+  it("peopleByArea includes empty areas", async () => {
+    const { result } = await renderLoadedBoard();
 
-    // R5 has no one assigned in demo data
     expect(result.current.peopleByArea["R5"]).toEqual([]);
-
-    // All areas should be present
     for (const area of ALL_AREAS) {
       expect(result.current.peopleByArea[area]).toBeDefined();
     }
   });
 
-  it("empty search returns all people", () => {
-    const { result } = renderHook(() => useBoard());
+  it("empty search returns all people", async () => {
+    const { result } = await renderLoadedBoard();
 
     act(() => {
       result.current.setSearchFilter("");
@@ -148,8 +248,8 @@ describe("useBoard", () => {
     expect(result.current.filteredPeople).toEqual(result.current.people);
   });
 
-  it("movePerson creates an audit log entry", () => {
-    const { result } = renderHook(() => useBoard());
+  it("movePerson creates an audit log entry (demo mode)", async () => {
+    const { result } = await renderLoadedBoard();
 
     act(() => {
       result.current.movePerson("demo-1", "R2");
@@ -166,8 +266,8 @@ describe("useBoard", () => {
     expect(entry?.personName).toBe("王小明");
   });
 
-  it("addPerson creates an audit log entry", () => {
-    const { result } = renderHook(() => useBoard());
+  it("addPerson creates an audit log entry (demo mode)", async () => {
+    const { result } = await renderLoadedBoard();
 
     act(() => {
       result.current.addPerson("新人員");

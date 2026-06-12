@@ -28,6 +28,10 @@ const DEMO_USER: AuthUser = {
   role: "editor",
 };
 
+// Roles live in app_metadata (admin-controlled). user_metadata is
+// self-service writable by any logged-in user via auth.updateUser(), so
+// reading the role from there allowed privilege escalation — the RLS
+// is_editor() helper was hardened the same way in migration 003.
 function parseRole(metadata: Record<string, unknown> | undefined): UserRole {
   const raw = metadata?.role;
   if (raw === "editor" || raw === "viewer") return raw;
@@ -59,7 +63,7 @@ export function useAuth(): UseAuthReturn {
         setUser({
           id: u.id,
           email: u.email ?? "",
-          role: parseRole(u.user_metadata),
+          role: parseRole(u.app_metadata),
         });
       }
       setIsLoading(false);
@@ -75,7 +79,7 @@ export function useAuth(): UseAuthReturn {
         setUser({
           id: u.id,
           email: u.email ?? "",
-          role: parseRole(u.user_metadata),
+          role: parseRole(u.app_metadata),
         });
       } else {
         setUser(null);
@@ -91,7 +95,14 @@ export function useAuth(): UseAuthReturn {
 
   const login = useCallback(
     async (email: string, password: string): Promise<void> => {
-      if (!isSupabaseConfigured || !supabase) return;
+      if (!isSupabaseConfigured || !supabase) {
+        // Misconfigured deployment (missing env vars): say so instead of
+        // silently no-opping on a login form that can never succeed.
+        setError(
+          "Supabase 未設定 — 請檢查 NEXT_PUBLIC_SUPABASE_URL 與 NEXT_PUBLIC_SUPABASE_ANON_KEY 環境變數",
+        );
+        return;
+      }
 
       setError(null);
       setIsLoading(true);

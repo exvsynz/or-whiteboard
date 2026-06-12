@@ -45,10 +45,13 @@ export function useDemoPlayback(
   const onStepRef = useRef(onStep);
   const onCompleteRef = useRef(onComplete);
 
-  // Keep refs in sync
-  stepsRef.current = steps;
-  onStepRef.current = onStep;
-  onCompleteRef.current = onComplete;
+  // Keep refs in sync (after render — mutating refs during render breaks
+  // with React 19 / the react-hooks/refs rule)
+  useEffect(() => {
+    stepsRef.current = steps;
+    onStepRef.current = onStep;
+    onCompleteRef.current = onComplete;
+  });
 
   const clearCurrentTimeout = useCallback(() => {
     if (timeoutRef.current !== null) {
@@ -57,8 +60,8 @@ export function useDemoPlayback(
     }
   }, []);
 
-  const scheduleStep = useCallback(
-    (index: number) => {
+  const scheduleStep = useCallback((startIndex: number) => {
+    const run = (index: number) => {
       const currentSteps = stepsRef.current;
       if (index >= currentSteps.length) {
         setIsPlaying(false);
@@ -74,11 +77,11 @@ export function useDemoPlayback(
         setProgress(index + 1);
         setCurrentPerson(step.person.name);
         progressRef.current = index + 1;
-        scheduleStep(index + 1);
+        run(index + 1);
       }, step.delay);
-    },
-    []
-  );
+    };
+    run(startIndex);
+  }, []);
 
   const play = useCallback(() => {
     clearCurrentTimeout();
