@@ -1,3 +1,11 @@
+export type Json =
+  | string
+  | number
+  | boolean
+  | null
+  | { [key: string]: Json | undefined }
+  | Json[];
+
 export type AreaCategory =
   | "leader"
   | "fixed_task"
@@ -16,86 +24,198 @@ export type ActionType =
   | "add_person"
   | "remove_person";
 
-export interface Area {
-  id: string;
-  name: string;
-  category: AreaCategory;
-  sort_order: number;
-  created_at: string;
-}
+export type AssignmentStatus = "assigned" | "break" | "relief";
 
-export interface Person {
-  id: string;
-  name: string;
-  role: string;
-  color: string;
-  is_active: boolean;
-  created_at: string;
-}
+export type RoomStatus =
+  | "idle"
+  | "induction"
+  | "surgery"
+  | "cleaning"
+  | "ready";
 
-export interface Assignment {
-  id: string;
-  person_id: string;
-  area_id: string | null;
-  board_date: string;
-  version: number;
-  updated_at: string;
-  updated_by: string | null;
-}
-
-export interface AuditLogEntry {
-  id: string;
-  timestamp: string;
-  user_id: string | null;
-  person_id: string;
-  from_area_id: string | null;
-  to_area_id: string | null;
-  action_type: ActionType;
-}
-
-export interface Database {
+// NOTE: Table row shapes are inline object types, NOT interfaces.
+// supabase-js v2 GenericSchema requires Row types to satisfy
+// Record<string, unknown>; interfaces lack the implicit index signature
+// and collapse every query's Insert/Update types to `never`.
+export type Database = {
   public: {
-    Views: {};
-    Functions: {};
     Tables: {
       areas: {
-        Row: Area;
-        Insert: Omit<Area, "id" | "created_at"> & {
+        Row: {
+          id: string;
+          name: string;
+          category: AreaCategory;
+          sort_order: number;
+          created_at: string;
+        };
+        Insert: {
           id?: string;
+          name: string;
+          category: AreaCategory;
+          sort_order?: number;
           created_at?: string;
         };
-        Update: Partial<Omit<Area, "id">>;
+        Update: {
+          name?: string;
+          category?: AreaCategory;
+          sort_order?: number;
+        };
         Relationships: [];
       };
       people: {
-        Row: Person;
-        Insert: Omit<Person, "id" | "created_at" | "is_active"> & {
+        Row: {
+          id: string;
+          name: string;
+          role: string;
+          color: string;
+          is_active: boolean;
+          created_at: string;
+        };
+        Insert: {
           id?: string;
+          name: string;
+          role?: string;
+          color?: string;
+          is_active?: boolean;
           created_at?: string;
+        };
+        Update: {
+          name?: string;
+          role?: string;
+          color?: string;
           is_active?: boolean;
         };
-        Update: Partial<Omit<Person, "id">>;
-        Relationships: [];
+        Relationships: [
+          {
+            foreignKeyName: "assignments_person_id_fkey";
+            columns: ["person_id"];
+            referencedRelation: "people";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       assignments: {
-        Row: Assignment;
-        Insert: Omit<Assignment, "id" | "version" | "updated_at"> & {
+        Row: {
+          id: string;
+          person_id: string;
+          area_id: string | null;
+          board_date: string;
+          status: AssignmentStatus;
+          version: number;
+          updated_at: string;
+          updated_by: string | null;
+        };
+        Insert: {
           id?: string;
+          person_id: string;
+          area_id?: string | null;
+          board_date?: string;
+          status?: AssignmentStatus;
           version?: number;
           updated_at?: string;
+          updated_by?: string | null;
         };
-        Update: Partial<Omit<Assignment, "id">>;
-        Relationships: [];
+        Update: {
+          area_id?: string | null;
+          board_date?: string;
+          status?: AssignmentStatus;
+          version?: number;
+          updated_at?: string;
+          updated_by?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "assignments_person_id_fkey";
+            columns: ["person_id"];
+            referencedRelation: "people";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "assignments_area_id_fkey";
+            columns: ["area_id"];
+            referencedRelation: "areas";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      area_status: {
+        Row: {
+          area_id: string;
+          status: RoomStatus;
+          note: string;
+          updated_at: string;
+          updated_by: string | null;
+        };
+        Insert: {
+          area_id: string;
+          status?: RoomStatus;
+          note?: string;
+          updated_at?: string;
+          updated_by?: string | null;
+        };
+        Update: {
+          status?: RoomStatus;
+          note?: string;
+          updated_at?: string;
+          updated_by?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "area_status_area_id_fkey";
+            columns: ["area_id"];
+            referencedRelation: "areas";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       audit_log: {
-        Row: AuditLogEntry;
-        Insert: Omit<AuditLogEntry, "id" | "timestamp"> & {
+        Row: {
+          id: string;
+          timestamp: string;
+          user_id: string | null;
+          person_id: string;
+          from_area_id: string | null;
+          to_area_id: string | null;
+          action_type: ActionType;
+        };
+        Insert: {
           id?: string;
           timestamp?: string;
+          user_id?: string | null;
+          person_id: string;
+          from_area_id?: string | null;
+          to_area_id?: string | null;
+          action_type: ActionType;
         };
         Update: never;
-        Relationships: [];
+        Relationships: [
+          {
+            foreignKeyName: "audit_log_person_id_fkey";
+            columns: ["person_id"];
+            referencedRelation: "people";
+            referencedColumns: ["id"];
+          },
+        ];
       };
     };
+    Views: { [_ in never]: never };
+    Functions: {
+      is_editor: {
+        Args: Record<string, never>;
+        Returns: boolean;
+      };
+      replace_board: {
+        Args: { p_board_date: string; p_people: Json };
+        Returns: Json;
+      };
+    };
+    Enums: { [_ in never]: never };
+    CompositeTypes: { [_ in never]: never };
   };
-}
+};
+
+export type Area = Database["public"]["Tables"]["areas"]["Row"];
+export type Person = Database["public"]["Tables"]["people"]["Row"];
+export type Assignment = Database["public"]["Tables"]["assignments"]["Row"];
+export type AreaStatusRow = Database["public"]["Tables"]["area_status"]["Row"];
+export type AuditLogEntry = Database["public"]["Tables"]["audit_log"]["Row"];
