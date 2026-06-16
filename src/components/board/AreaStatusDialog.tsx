@@ -6,7 +6,7 @@ import {
   ROOM_STATUS_ORDER,
 } from "@/lib/board-constants";
 import type { RoomStatus } from "@/lib/database.types";
-import type { AreaStatusInfo } from "@/lib/board-data";
+import type { AreaStatusInfo } from "@/lib/board-types";
 import { Button } from "@/components/ui/button";
 
 interface AreaStatusDialogProps {

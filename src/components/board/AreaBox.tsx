@@ -3,7 +3,7 @@
 import { memo } from "react";
 import { useDroppable } from "@dnd-kit/core";
 import { ROOM_STATUS_META } from "@/lib/board-constants";
-import type { AreaStatusInfo } from "@/lib/board-data";
+import type { AreaStatusInfo } from "@/lib/board-types";
 
 interface AreaBoxProps {
   id: string;

@@ -16,20 +16,24 @@ function deferred<T>() {
 
 // ---- fake supabase client (channel plumbing only — data layer is mocked) ----
 
-const subscribeCallbacks: Array<(status: string) => void> = [];
-const fakeChannel = {
-  on: vi.fn(),
-  subscribe: vi.fn((cb: (status: string) => void) => {
-    subscribeCallbacks.push(cb);
-    return fakeChannel;
-  }),
-};
-fakeChannel.on.mockReturnValue(fakeChannel);
-
-const fakeClient = {
-  channel: vi.fn(() => fakeChannel),
-  removeChannel: vi.fn(),
-};
+// Hoisted so the mock factory below (and backend-config, which now builds the
+// backend at module load) can reach fakeClient at import time without a TDZ.
+const { fakeClient, fakeChannel, subscribeCallbacks } = vi.hoisted(() => {
+  const subscribeCallbacks: Array<(status: string) => void> = [];
+  const fakeChannel = {
+    on: vi.fn(),
+    subscribe: vi.fn((cb: (status: string) => void) => {
+      subscribeCallbacks.push(cb);
+      return fakeChannel;
+    }),
+  };
+  fakeChannel.on.mockReturnValue(fakeChannel);
+  const fakeClient = {
+    channel: vi.fn(() => fakeChannel),
+    removeChannel: vi.fn(),
+  };
+  return { fakeClient, fakeChannel, subscribeCallbacks };
+});
 
 vi.mock("@/lib/supabase-client", () => ({
   get supabase() {

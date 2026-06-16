@@ -13,26 +13,22 @@ import {
   loadBoard,
   saveBoard,
   clearBoard,
-  loadAreaStatuses,
   saveAreaStatuses,
 } from "@/lib/board-storage";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase-client";
 import { useDebouncedCallback } from "@/lib/use-debounce";
 import { logAuditEntry } from "@/lib/audit-client";
 import { localDateString } from "@/lib/board-export";
-import {
-  fetchRoster,
-  upsertAssignment,
-  addPersonToRoster,
-  removeFromRoster,
-  replaceBoard,
-  fetchAreaStatuses,
-  setAreaStatus as persistAreaStatus,
-  setAssignmentStatus,
-  type AreaStatusInfo,
-} from "@/lib/board-data";
+import { getBackend } from "@/lib/backend-config";
+import type { AreaStatusInfo } from "@/lib/board-types";
 
 export type { BoardPerson };
+
+// The active persistence backend (demo or Supabase) is fixed for the session,
+// like the supabase-client singleton. `remote` is null in demo mode — every
+// server write is gated on it, so demo never enters the optimistic queue.
+const backend = getBackend();
+const remote = backend.remote;
 
 export type ConnectionStatus =
   | "local"
@@ -129,7 +125,7 @@ export function useBoard(): UseBoardReturn {
   const [error, setError] = useState<string | null>(null);
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>(
-    isSupabaseConfigured ? "connecting" : "local",
+    backend.capabilities.realtime ? "connecting" : "local",
   );
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [isStale, setIsStale] = useState(false);
@@ -169,11 +165,10 @@ export function useBoard(): UseBoardReturn {
     if (!entry) return;
     pendingRef.current.delete(personId);
     clearTimeout(entry.timer);
-    if (!supabase) return;
+    if (!remote) return;
     inFlightRef.current.set(personId, entry);
     try {
-      await upsertAssignment(
-        supabase,
+      await remote.upsertAssignment(
         personId,
         entry.targetArea,
         entry.boardDate,
@@ -262,23 +257,21 @@ export function useBoard(): UseBoardReturn {
       // the effect body (react-hooks/set-state-in-effect).
       await Promise.resolve();
       if (cancelled) return;
-      if (!isSupabaseConfigured || !supabase) {
-        const stored = loadBoard(boardDate);
-        if (stored) {
-          // A stored board wins even when empty — a deliberately cleared
-          // roster must not resurrect the demo people on reload.
-          setPeople(stored.people);
-        } else if (boardDate === localDateString()) {
-          setPeople(DEMO_PEOPLE);
-        } else {
-          setPeople([]);
-        }
-        setAreaStatuses(loadAreaStatuses());
+      if (!remote) {
+        // Demo: the backend reads the local cache (or the seeded roster for
+        // today); statuses likewise come from local storage.
+        const [roster, statuses] = await Promise.all([
+          backend.fetchRoster(boardDate),
+          backend.fetchAreaStatuses(),
+        ]);
+        if (cancelled) return;
+        setPeople(roster);
+        setAreaStatuses(statuses);
       } else {
         try {
           const [roster, statuses] = await Promise.all([
-            fetchRoster(supabase, boardDate),
-            fetchAreaStatuses(supabase),
+            backend.fetchRoster(boardDate),
+            backend.fetchAreaStatuses(),
           ]);
           if (cancelled) return;
           setPeople(applyPending(roster));
@@ -308,13 +301,13 @@ export function useBoard(): UseBoardReturn {
   // ---- refetch (realtime / reconnect / focus / poll) ----
 
   const refetch = useCallback(async (): Promise<void> => {
-    if (!isSupabaseConfigured || !supabase) return;
+    if (!remote) return;
     if (playbackActiveRef.current) return;
     const date = boardDateRef.current;
     try {
       const [roster, statuses] = await Promise.all([
-        fetchRoster(supabase, date),
-        fetchAreaStatuses(supabase),
+        backend.fetchRoster(date),
+        backend.fetchAreaStatuses(),
       ]);
       if (playbackActiveRef.current) return;
       // The user may have switched dates while this was on the network —
@@ -459,7 +452,7 @@ export function useBoard(): UseBoardReturn {
       const person = peopleRef.current.find((p) => p.id === personId);
       if (!person || person.area === targetArea) return;
 
-      if (!isSupabaseConfigured) {
+      if (!remote) {
         logAuditEntry({
           personId,
           personName: person.name,
@@ -479,7 +472,7 @@ export function useBoard(): UseBoardReturn {
       );
 
       if (opts?.persist === false) return;
-      if (isSupabaseConfigured && supabase) {
+      if (remote) {
         enqueueWrite(personId, person.area, targetArea);
       }
     },
@@ -488,9 +481,9 @@ export function useBoard(): UseBoardReturn {
 
   const addPerson = useCallback((name: string) => {
     const color = nextColor();
-    if (isSupabaseConfigured && supabase) {
+    if (remote) {
       const date = boardDateRef.current;
-      addPersonToRoster(supabase, name, "未設定", color, date)
+      remote.addPerson(name, "未設定", color, date)
         .then((person) => {
           // The board may have switched dates while the insert was on the
           // network — the person belongs to the original date's roster.
@@ -532,8 +525,8 @@ export function useBoard(): UseBoardReturn {
 
     setPeople((prev) => prev.filter((p) => p.id !== personId));
 
-    if (isSupabaseConfigured && supabase) {
-      removeFromRoster(supabase, personId, boardDateRef.current)
+    if (remote) {
+      remote.removePerson(personId, boardDateRef.current)
         .then(() => {
           setLastSyncedAt(new Date());
         })
@@ -565,8 +558,8 @@ export function useBoard(): UseBoardReturn {
       setPeople((prev) =>
         prev.map((p) => (p.id === personId ? { ...p, status } : p)),
       );
-      if (isSupabaseConfigured && supabase) {
-        setAssignmentStatus(supabase, personId, boardDateRef.current, status)
+      if (remote) {
+        remote.setAssignmentStatus(personId, boardDateRef.current, status)
           .then(() => setLastSyncedAt(new Date()))
           .catch((err: unknown) => {
             setPeople((prev) =>
@@ -589,8 +582,8 @@ export function useBoard(): UseBoardReturn {
       opts?: { displayUnassigned?: boolean },
     ): Promise<BoardPerson[]> => {
       let adopted = newPeople;
-      if (isSupabaseConfigured && supabase) {
-        adopted = await replaceBoard(supabase, boardDateRef.current, newPeople);
+      if (remote) {
+        adopted = await remote.replaceBoard(boardDateRef.current, newPeople);
         setLastSyncedAt(new Date());
       }
       setPeople(
@@ -605,10 +598,10 @@ export function useBoard(): UseBoardReturn {
   );
 
   const resetBoard = useCallback(() => {
-    if (isSupabaseConfigured && supabase) {
+    if (remote) {
       // Clearing the date's roster server-side keeps every client in sync
       // (and the deletion is audited by the assignments trigger).
-      replaceBoard(supabase, boardDateRef.current, [])
+      remote.replaceBoard(boardDateRef.current, [])
         .then(() => {
           setPeople([]);
           setLastSyncedAt(new Date());
@@ -661,7 +654,7 @@ export function useBoard(): UseBoardReturn {
   // otherwise vanish on reload. (Effect-based so updateAreaStatus can use
   // a functional update without losing batched changes.)
   useEffect(() => {
-    if (!isSupabaseConfigured && loadedKey !== null) {
+    if (!remote && loadedKey !== null) {
       saveAreaStatuses(areaStatuses);
     }
   }, [areaStatuses, loadedKey]);
@@ -674,8 +667,8 @@ export function useBoard(): UseBoardReturn {
         next.set(areaName, { status, note });
         return next;
       });
-      if (isSupabaseConfigured && supabase) {
-        persistAreaStatus(supabase, areaName, status, note).catch(
+      if (remote) {
+        remote.setAreaStatus(areaName, status, note).catch(
           (err: unknown) => {
             setAreaStatuses((current) => {
               const reverted = new Map(current);

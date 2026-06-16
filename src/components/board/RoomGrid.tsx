@@ -6,7 +6,7 @@ import type { BoardPerson } from "@/lib/board-constants";
 import { PersonCard } from "./PersonCard";
 import { AreaBox } from "./AreaBox";
 
-import type { AreaStatusInfo } from "@/lib/board-data";
+import type { AreaStatusInfo } from "@/lib/board-types";
 import type { AssignmentStatus } from "@/lib/database.types";
 
 interface RoomGridProps {

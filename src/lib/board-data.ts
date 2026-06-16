@@ -6,17 +6,13 @@ import type {
   Json,
 } from "./database.types";
 import type { BoardPerson } from "./board-constants";
+import type { AreaStatusInfo } from "./board-types";
 
 type Client = SupabaseClient<Database>;
 
 export interface AreaMaps {
   idByName: Map<string, string>;
   nameById: Map<string, string>;
-}
-
-export interface AreaStatusInfo {
-  status: RoomStatus;
-  note: string;
 }
 
 // The client works with canonical area NAMES (board-constants); the DB is

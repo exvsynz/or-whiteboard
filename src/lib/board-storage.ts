@@ -1,5 +1,5 @@
 import type { BoardPerson } from "./board-constants";
-import type { AreaStatusInfo } from "./board-data";
+import type { AreaStatusInfo } from "./board-types";
 
 // Boards are stored per date so planning tomorrow's 班表 can't destroy
 // today's. When Supabase is configured this is only an offline fallback
