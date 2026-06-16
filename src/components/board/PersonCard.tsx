@@ -1,10 +1,25 @@
 "use client";
 
-import { memo, useState, useCallback, useEffect, useRef } from "react";
+import {
+  memo,
+  useState,
+  useCallback,
+  useEffect,
+  useRef,
+  createContext,
+  useContext,
+} from "react";
 import { useDraggable } from "@dnd-kit/core";
 import type { BoardPerson } from "@/lib/board-constants";
 import { ASSIGNMENT_STATUS_META } from "@/lib/board-constants";
 import type { AssignmentStatus } from "@/lib/database.types";
+
+/**
+ * On phones a single tap opens the status menu (thumb-friendly) instead of the
+ * history drawer. Board provides `true` below lg via this context, so PersonCard
+ * needn't be prop-drilled through every column component.
+ */
+export const MobileTapMenuContext = createContext(false);
 
 interface PersonCardProps {
   person: BoardPerson;
@@ -167,6 +182,7 @@ const DraggablePersonCard = memo(function DraggablePersonCard({
   });
 
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const tapOpensMenu = useContext(MobileTapMenuContext);
 
   // No translate transform here: Board renders a <DragOverlay> copy that
   // follows the cursor, so the original stays in place as the dimmed ghost.
@@ -182,6 +198,24 @@ const DraggablePersonCard = memo(function DraggablePersonCard({
       setMenu({ x: e.clientX, y: e.clientY });
     },
     [onRemove, onSetStatus],
+  );
+
+  const handleClick = useCallback(
+    (e: React.MouseEvent) => {
+      // Phones: a single tap opens the status menu (thumb-friendly). Desktop:
+      // a tap opens history; right-click / long-press opens the menu. Clamp the
+      // position so the menu can't render off the edge of a small screen.
+      if (tapOpensMenu && (onSetStatus || onRemove)) {
+        e.preventDefault();
+        setMenu({
+          x: Math.min(e.clientX, window.innerWidth - 140),
+          y: Math.min(e.clientY, window.innerHeight - 120),
+        });
+        return;
+      }
+      onClick?.();
+    },
+    [tapOpensMenu, onSetStatus, onRemove, onClick],
   );
 
   // Compose with dnd-kit's KeyboardSensor activator (delivered via
@@ -214,7 +248,7 @@ const DraggablePersonCard = memo(function DraggablePersonCard({
         tabIndex={0}
         aria-roledescription="draggable item"
         aria-describedby="dnd-instructions"
-        onClick={onClick}
+        onClick={handleClick}
         onKeyDown={handleKeyDown}
         onContextMenu={handleContextMenu}
       >

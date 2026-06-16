@@ -1,7 +1,7 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi, beforeAll } from "vitest";
 import { DndContext } from "@dnd-kit/core";
-import { PersonCard } from "../PersonCard";
+import { PersonCard, MobileTapMenuContext } from "../PersonCard";
 import type { BoardPerson } from "@/lib/board-constants";
 
 const mockPerson: BoardPerson = {
@@ -100,6 +100,56 @@ describe("PersonCard", () => {
       expect(card.className).toContain("opacity-30");
       expect(card.style.touchAction).toBe("none");
       expect(card.style.transform).toBe("");
+    });
+  });
+
+  describe("mobile single-tap status menu", () => {
+    function renderMobile(ui: React.ReactElement) {
+      return render(
+        <DndContext sensors={[]}>
+          <MobileTapMenuContext.Provider value={true}>
+            {ui}
+          </MobileTapMenuContext.Provider>
+        </DndContext>,
+      );
+    }
+
+    it("a tap opens the status menu (not history) on a phone", () => {
+      const onClick = vi.fn();
+      renderMobile(
+        <PersonCard
+          person={mockPerson}
+          onClick={onClick}
+          onSetStatus={vi.fn()}
+          onRemove={vi.fn()}
+        />,
+      );
+      fireEvent.click(screen.getByRole("button"));
+      expect(
+        screen.getByRole("menuitem", { name: "標記休息" }),
+      ).toBeInTheDocument();
+      expect(onClick).not.toHaveBeenCalled();
+    });
+
+    it("tapping a menu item invokes the status change", () => {
+      const onSetStatus = vi.fn();
+      renderMobile(
+        <PersonCard
+          person={mockPerson}
+          onSetStatus={onSetStatus}
+          onRemove={vi.fn()}
+        />,
+      );
+      fireEvent.click(screen.getByRole("button"));
+      fireEvent.click(screen.getByRole("menuitem", { name: "標記休息" }));
+      expect(onSetStatus).toHaveBeenCalledWith("break");
+    });
+
+    it("falls back to history when the card has no edit actions (viewer)", () => {
+      const onClick = vi.fn();
+      renderMobile(<PersonCard person={mockPerson} onClick={onClick} />);
+      fireEvent.click(screen.getByRole("button"));
+      expect(onClick).toHaveBeenCalledTimes(1);
     });
   });
 });

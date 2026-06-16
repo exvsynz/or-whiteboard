@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 
 // Leaders check the board on their phones, so it must reflow into a stacked,
 // page-scrolling layout rather than staying locked to the wall-display kiosk.
-test.use({ viewport: { width: 390, height: 844 } });
+test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/");
@@ -61,4 +61,17 @@ test("drag is disabled on phones — cards stay put (tap/scroll only)", async ({
   await expect(
     page.locator('[data-area="R2"]').getByText("王小明"),
   ).toHaveCount(0);
+});
+
+test("single tap opens the status menu and marks status on a phone", async ({
+  page,
+}) => {
+  await page.goto("/");
+  // A single tap (not long-press) opens the status menu on phones.
+  await page.getByText("王小明").tap();
+  await page.getByRole("menuitem", { name: "標記休息" }).tap();
+  // The card now carries the 休息 badge.
+  await expect(
+    page.locator('[data-area="R1"]').getByText("休息"),
+  ).toBeVisible();
 });

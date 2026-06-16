@@ -31,7 +31,7 @@ import {
   downloadBlob,
   localDateString,
 } from "@/lib/board-export";
-import { PersonCard } from "./PersonCard";
+import { PersonCard, MobileTapMenuContext } from "./PersonCard";
 import { AreaBox } from "./AreaBox";
 import { AreaStatusDialog } from "./AreaStatusDialog";
 import { BoardToolbar } from "./BoardToolbar";
@@ -403,6 +403,7 @@ export default function Board() {
   const today = localDateString();
 
   return (
+    <MobileTapMenuContext.Provider value={!isWide}>
     <DndContext
       sensors={isEditor && isWide ? sensors : noSensors}
       collisionDetection={dropCollision}
@@ -690,5 +691,6 @@ export default function Board() {
         currentCount={people.length}
       />
     </DndContext>
+    </MobileTapMenuContext.Provider>
   );
 }
