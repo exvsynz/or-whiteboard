@@ -15,11 +15,11 @@ import {
   clearBoard,
   saveAreaStatuses,
 } from "@/lib/board-storage";
-import { supabase, isSupabaseConfigured } from "@/lib/supabase-client";
 import { useDebouncedCallback } from "@/lib/use-debounce";
 import { logAuditEntry } from "@/lib/audit-client";
 import { localDateString } from "@/lib/board-export";
 import { getBackend } from "@/lib/backend-config";
+import type { ConnectionStatus } from "@/lib/board-backend";
 import type { AreaStatusInfo } from "@/lib/board-types";
 
 export type { BoardPerson };
@@ -30,11 +30,7 @@ export type { BoardPerson };
 const backend = getBackend();
 const remote = backend.remote;
 
-export type ConnectionStatus =
-  | "local"
-  | "connecting"
-  | "connected"
-  | "disconnected";
+export type { ConnectionStatus };
 
 export type SaveState = "idle" | "saving" | "saved";
 
@@ -333,61 +329,24 @@ export function useBoard(): UseBoardReturn {
   }, [refetch]);
 
   useEffect(() => {
-    if (!isSupabaseConfigured || !supabase) return;
-    const client = supabase;
-    // removeChannel fires the subscribe callback with CLOSED during
-    // cleanup — without this flag every date switch flashes 連線中斷.
-    let active = true;
+    if (!remote) return;
+    const unsubscribe = backend.subscribe(boardDate, {
+      onChange: scheduleRefetch,
+      onStatus: setConnectionStatus,
+    });
 
-    const channel = client
-      .channel(`board-${boardDate}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "assignments",
-          filter: `board_date=eq.${boardDate}`,
-        },
-        scheduleRefetch,
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "people" },
-        scheduleRefetch,
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "area_status" },
-        scheduleRefetch,
-      )
-      .subscribe((status) => {
-        if (!active) return;
-        if (status === "SUBSCRIBED") {
-          setConnectionStatus("connected");
-          // Catch up on anything missed while the channel was down.
-          scheduleRefetch();
-        } else if (
-          status === "CHANNEL_ERROR" ||
-          status === "TIMED_OUT" ||
-          status === "CLOSED"
-        ) {
-          setConnectionStatus("disconnected");
-        }
-      });
-
+    // Kiosk safety net (backend-neutral): realtime can silently die behind
+    // hospital proxies, and the tab may be backgrounded for hours.
     const onOnline = () => scheduleRefetch();
     const onVisible = () => {
       if (document.visibilityState === "visible") scheduleRefetch();
     };
     window.addEventListener("online", onOnline);
     document.addEventListener("visibilitychange", onVisible);
-    // Kiosk safety net: realtime can silently die behind hospital proxies.
     const poll = setInterval(scheduleRefetch, KIOSK_POLL_MS);
 
     return () => {
-      active = false;
-      void client.removeChannel(channel);
+      unsubscribe();
       window.removeEventListener("online", onOnline);
       document.removeEventListener("visibilitychange", onVisible);
       clearInterval(poll);

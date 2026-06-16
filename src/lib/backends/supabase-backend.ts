@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "../database.types";
-import type { BoardBackend } from "../board-backend";
+import type { BoardBackend, SubscribeHandlers } from "../board-backend";
 import {
   fetchRoster,
   fetchAreaStatuses,
@@ -44,6 +44,55 @@ export function createSupabaseBackend(client: Client): BoardBackend {
         replaceBoard(client, boardDate, people),
       setAreaStatus: (areaName, status, note) =>
         setAreaStatus(client, areaName, status, note),
+    },
+
+    subscribe(
+      boardDate: string,
+      { onChange, onStatus }: SubscribeHandlers,
+    ): () => void {
+      // removeChannel fires the subscribe callback with CLOSED during cleanup —
+      // without this flag every date switch flashes 連線中斷.
+      let active = true;
+      const channel = client
+        .channel(`board-${boardDate}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "assignments",
+            filter: `board_date=eq.${boardDate}`,
+          },
+          onChange,
+        )
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "people" },
+          onChange,
+        )
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "area_status" },
+          onChange,
+        )
+        .subscribe((status) => {
+          if (!active) return;
+          if (status === "SUBSCRIBED") {
+            onStatus("connected");
+            // Catch up on anything missed while the channel was down.
+            onChange();
+          } else if (
+            status === "CHANNEL_ERROR" ||
+            status === "TIMED_OUT" ||
+            status === "CLOSED"
+          ) {
+            onStatus("disconnected");
+          }
+        });
+      return () => {
+        active = false;
+        void client.removeChannel(channel);
+      };
     },
   };
 }

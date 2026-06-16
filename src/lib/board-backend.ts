@@ -4,6 +4,19 @@ import type { AssignmentStatus, RoomStatus } from "./database.types";
 
 export type BackendKind = "demo" | "supabase" | "sharepoint";
 
+export type ConnectionStatus =
+  | "local"
+  | "connecting"
+  | "connected"
+  | "disconnected";
+
+export interface SubscribeHandlers {
+  /** Fires when the board may have changed server-side; the caller refetches. */
+  onChange: () => void;
+  /** Reports realtime connection transitions. */
+  onStatus: (status: ConnectionStatus) => void;
+}
+
 export interface BackendCapabilities {
   /** Server pushes changes (realtime). false → the client polls for freshness. */
   realtime: boolean;
@@ -61,4 +74,9 @@ export interface BoardBackend extends BoardReader {
   readonly capabilities: BackendCapabilities;
   /** null in demo mode (no server persistence). */
   readonly remote: RemoteBoardWriter | null;
+  /**
+   * Subscribe to server-side changes for a board date. The demo backend
+   * returns a no-op unsubscribe (no realtime). Returns the unsubscribe fn.
+   */
+  subscribe(boardDate: string, handlers: SubscribeHandlers): () => void;
 }

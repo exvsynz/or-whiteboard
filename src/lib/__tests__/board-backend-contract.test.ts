@@ -138,4 +138,57 @@ describe("BoardBackend contract", () => {
     await createSupabaseBackend(fakeClient).remote!.replaceBoard(TODAY, people);
     expect(boardData.replaceBoard).toHaveBeenCalledWith(fakeClient, TODAY, people);
   });
+
+  // ---- subscribe ----
+
+  it("demo subscribe is a no-op returning an unsubscribe function", () => {
+    const onChange = vi.fn();
+    const onStatus = vi.fn();
+    const unsubscribe = createDemoBackend().subscribe(TODAY, {
+      onChange,
+      onStatus,
+    });
+    expect(typeof unsubscribe).toBe("function");
+    unsubscribe();
+    expect(onChange).not.toHaveBeenCalled();
+    expect(onStatus).not.toHaveBeenCalled();
+  });
+
+  it("supabase subscribe wires a channel and unsubscribe removes it", () => {
+    const channel = { on: vi.fn(), subscribe: vi.fn() };
+    channel.on.mockReturnValue(channel);
+    channel.subscribe.mockReturnValue(channel);
+    const client = { channel: vi.fn(() => channel), removeChannel: vi.fn() };
+    const unsubscribe = createSupabaseBackend(client as never).subscribe(TODAY, {
+      onChange: vi.fn(),
+      onStatus: vi.fn(),
+    });
+    expect(client.channel).toHaveBeenCalled();
+    expect(channel.subscribe).toHaveBeenCalled();
+    unsubscribe();
+    expect(client.removeChannel).toHaveBeenCalledWith(channel);
+  });
+
+  it("supabase subscribe reports connected + refetches on SUBSCRIBED, disconnected on CLOSED", () => {
+    let statusCb: (s: string) => void = () => {};
+    const channel = {
+      on: vi.fn(),
+      subscribe: vi.fn((cb: (s: string) => void) => {
+        statusCb = cb;
+        return channel;
+      }),
+    };
+    channel.on.mockReturnValue(channel);
+    const client = { channel: vi.fn(() => channel), removeChannel: vi.fn() };
+    const onChange = vi.fn();
+    const onStatus = vi.fn();
+    createSupabaseBackend(client as never).subscribe(TODAY, { onChange, onStatus });
+
+    statusCb("SUBSCRIBED");
+    expect(onStatus).toHaveBeenCalledWith("connected");
+    expect(onChange).toHaveBeenCalledTimes(1);
+
+    statusCb("CLOSED");
+    expect(onStatus).toHaveBeenCalledWith("disconnected");
+  });
 });

@@ -489,9 +489,7 @@ export default function Board() {
             <SyncIndicator
               lastSyncedAt={lastSyncedAt}
               error={error}
-              connectionStatus={
-                connectionStatus === "local" ? undefined : connectionStatus
-              }
+              connectionStatus={connectionStatus}
             />
           </div>
 

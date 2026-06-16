@@ -1,12 +1,12 @@
 "use client";
 
 import { memo, useEffect, useState } from "react";
-import { isSupabaseConfigured } from "@/lib/supabase-client";
+import type { ConnectionStatus } from "@/lib/board-backend";
 
 interface SyncIndicatorProps {
   lastSyncedAt: Date | null;
   error: string | null;
-  connectionStatus?: "connected" | "connecting" | "disconnected";
+  connectionStatus?: ConnectionStatus;
 }
 
 const STALE_THRESHOLD_MS = 2 * 60 * 1000;
@@ -51,7 +51,7 @@ function SyncIndicatorInner({
   } else if (error) {
     dotClass = "bg-red-500";
     text = error;
-  } else if (!isSupabaseConfigured) {
+  } else if (connectionStatus === "local") {
     dotClass = "bg-yellow-500";
     text = "離線模式";
   } else if (lastSyncedAt) {

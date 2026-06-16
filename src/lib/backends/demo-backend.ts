@@ -33,5 +33,10 @@ export function createDemoBackend(): BoardBackend {
     async fetchAreaStatuses(): Promise<Map<string, AreaStatusInfo>> {
       return loadAreaStatuses();
     },
+
+    subscribe(): () => void {
+      // Demo has no realtime; a no-op unsubscribe keeps callers uniform.
+      return () => {};
+    },
   };
 }
