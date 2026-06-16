@@ -110,6 +110,19 @@ export default function Board() {
   // activate dnd-kit's built-in defaults and let viewers drag cards.
   const noSensors = useSensors();
 
+  // Drag is a wall-display / desktop affordance only. On phones (< lg) the
+  // active TouchSensor would swallow quick taps and the long-press status menu
+  // and block page scrolling, so we run no drag sensors there — leaders get
+  // pure tap + scroll. Default wide so the kiosk has sensors on first paint.
+  const [isWide, setIsWide] = useState(true);
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 1024px)");
+    const update = () => setIsWide(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
+
   const announce = useCallback((message: string) => {
     if (liveRegionRef.current) liveRegionRef.current.textContent = message;
   }, []);
@@ -391,7 +404,7 @@ export default function Board() {
 
   return (
     <DndContext
-      sensors={isEditor ? sensors : noSensors}
+      sensors={isEditor && isWide ? sensors : noSensors}
       collisionDetection={dropCollision}
       onDragStart={handleDragStart}
       onDragOver={handleDragOver}

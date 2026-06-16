@@ -30,3 +30,35 @@ test("board reflows for a phone: renders stacked, fit-to-screen hidden, page scr
   );
   expect(scrolls).toBe(true);
 });
+
+test("drag is disabled on phones — cards stay put (tap/scroll only)", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const card = page.getByText("王小明");
+  await card.scrollIntoViewIfNeeded();
+  const cardBox = (await card.boundingBox())!;
+  const target = page.locator('[data-area="R2"]');
+  const targetBox = (await target.boundingBox())!;
+
+  // Same gesture the desktop test uses to reassign — must be a no-op here,
+  // because the drag sensors are off below lg (so taps + scroll stay free).
+  await page.mouse.move(
+    cardBox.x + cardBox.width / 2,
+    cardBox.y + cardBox.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    targetBox.x + targetBox.width / 2,
+    targetBox.y + targetBox.height / 2,
+    { steps: 12 },
+  );
+  await page.mouse.up();
+
+  await expect(
+    page.locator('[data-area="R1"]').getByText("王小明"),
+  ).toBeVisible();
+  await expect(
+    page.locator('[data-area="R2"]').getByText("王小明"),
+  ).toHaveCount(0);
+});
