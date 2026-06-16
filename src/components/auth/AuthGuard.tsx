@@ -2,8 +2,10 @@
 
 import { useState } from "react";
 import { useAuthContext } from "./AuthProvider";
-import { isDemoMode, isSupabaseConfigured } from "@/lib/supabase-client";
+import { getAuthAdapter } from "@/lib/auth-adapter";
 import { Button } from "@/components/ui/button";
+
+const authAdapter = getAuthAdapter();
 
 interface AuthGuardProps {
   children: React.ReactNode;
@@ -64,11 +66,11 @@ function LoginPrompt() {
 export function AuthGuard({ children, fallback }: AuthGuardProps) {
   const { isAuthenticated, isLoading } = useAuthContext();
 
-  if (isDemoMode) return <>{children}</>;
+  if (authAdapter.bypassAuth) return <>{children}</>;
 
   // Misconfigured deployment: without env vars the login form could never
   // succeed — show what's wrong instead of a dead form.
-  if (!isSupabaseConfigured) {
+  if (!authAdapter.configured) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gray-50">
         <div className="w-full max-w-md rounded-xl border border-amber-300 bg-amber-50 p-6 text-amber-800 shadow-sm">
