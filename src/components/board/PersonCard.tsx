@@ -82,6 +82,7 @@ function ContextMenu({
   person,
   onRemove,
   onSetStatus,
+  onViewHistory,
   onClose,
 }: {
   x: number;
@@ -89,6 +90,7 @@ function ContextMenu({
   person: BoardPerson;
   onRemove?: () => void;
   onSetStatus?: (status: AssignmentStatus) => void;
+  onViewHistory?: () => void;
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -121,6 +123,18 @@ function ContextMenu({
       className="fixed z-50 min-w-[120px] rounded-lg border border-slate-200 bg-white py-1 shadow-lg"
       style={{ top: y, left: x }}
     >
+      {onViewHistory && (
+        <button
+          role="menuitem"
+          className="w-full px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-50"
+          onClick={() => {
+            onViewHistory();
+            onClose();
+          }}
+        >
+          查看歷史
+        </button>
+      )}
       {onSetStatus &&
         statusItems.map(({ status, label }) =>
           currentStatus === status ? (
@@ -265,6 +279,7 @@ const DraggablePersonCard = memo(function DraggablePersonCard({
           person={person}
           onRemove={onRemove}
           onSetStatus={onSetStatus}
+          onViewHistory={onClick}
           onClose={() => setMenu(null)}
         />
       )}

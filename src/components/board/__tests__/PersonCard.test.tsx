@@ -151,5 +151,20 @@ describe("PersonCard", () => {
       fireEvent.click(screen.getByRole("button"));
       expect(onClick).toHaveBeenCalledTimes(1);
     });
+
+    it("offers 查看歷史 in the menu, which opens the history drawer", () => {
+      const onClick = vi.fn();
+      renderMobile(
+        <PersonCard
+          person={mockPerson}
+          onClick={onClick}
+          onSetStatus={vi.fn()}
+          onRemove={vi.fn()}
+        />,
+      );
+      fireEvent.click(screen.getByRole("button"));
+      fireEvent.click(screen.getByRole("menuitem", { name: "查看歷史" }));
+      expect(onClick).toHaveBeenCalledTimes(1);
+    });
   });
 });

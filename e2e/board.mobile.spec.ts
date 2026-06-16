@@ -75,3 +75,14 @@ test("single tap opens the status menu and marks status on a phone", async ({
     page.locator('[data-area="R1"]').getByText("休息"),
   ).toBeVisible();
 });
+
+test("查看歷史 in the tap menu opens the person's history on a phone", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.getByText("王小明").tap();
+  await page.getByRole("menuitem", { name: "查看歷史" }).tap();
+  await expect(
+    page.getByRole("dialog", { name: "王小明 歷史紀錄" }),
+  ).toBeVisible();
+});
