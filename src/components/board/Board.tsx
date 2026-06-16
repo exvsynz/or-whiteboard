@@ -352,6 +352,12 @@ export default function Board() {
     const recalc = () => {
       const root = boardRef.current;
       if (!root) return;
+      // Fit-to-screen is a wall-display feature; below lg the board stacks and
+      // the page scrolls, so force 1:1.
+      if (window.innerWidth < 1024) {
+        setZoomLevel(1);
+        return;
+      }
       const prev = {
         zoom: root.style.zoom,
         height: root.style.height,
@@ -394,7 +400,7 @@ export default function Board() {
     >
       <div
         ref={boardRef}
-        className="flex h-dvh flex-col overflow-hidden bg-slate-100 p-2 text-slate-900"
+        className="flex min-h-dvh flex-col bg-slate-100 p-2 text-slate-900 lg:h-dvh lg:overflow-hidden"
         // CSS zoom scales the container AND its content equally, which
         // leaves overflow ratios unchanged — compensating the height by
         // 1/zoom keeps the box viewport-sized so only the content shrinks.
@@ -411,8 +417,8 @@ export default function Board() {
             : undefined
         }
       >
-        <div className="mx-auto flex w-full max-w-[1900px] flex-1 flex-col gap-1.5 overflow-hidden">
-          <div className="flex flex-none items-center gap-2">
+        <div className="mx-auto flex w-full max-w-[1900px] flex-1 flex-col gap-1.5 lg:overflow-hidden">
+          <div className="flex flex-none flex-wrap items-center gap-2">
             <h1 className="text-lg font-black tracking-tight">
               手術室人力白板
             </h1>
@@ -474,7 +480,7 @@ export default function Board() {
             </AreaBox>
             <button
               onClick={toggleFitToScreen}
-              className={`rounded-lg px-2 py-1 text-xs ${fitToScreen ? "bg-blue-100 text-blue-700" : "bg-slate-200 text-slate-600"}`}
+              className={`hidden rounded-lg px-2 py-1 text-xs lg:inline-block ${fitToScreen ? "bg-blue-100 text-blue-700" : "bg-slate-200 text-slate-600"}`}
               title={fitToScreen ? "結束自動縮放" : "自動縮放至螢幕大小"}
             >
               {fitToScreen ? "🔍 縮放中" : "🔍 縮放"}
@@ -547,16 +553,10 @@ export default function Board() {
           ) : (
             <>
               <StatsBar people={people} />
-              <div
-                className="grid min-h-0 flex-1 gap-2"
-                style={{
-                  gridTemplateColumns:
-                    "minmax(140px, 200px) 1fr minmax(200px, 260px) minmax(160px, 220px)",
-                }}
-              >
+              <div className="grid min-h-0 flex-1 grid-cols-1 gap-2 lg:grid-cols-[minmax(140px,200px)_1fr_minmax(200px,260px)_minmax(160px,220px)]">
                 <section
                   aria-label="左側固定任務"
-                  className="overflow-y-auto"
+                  className="lg:overflow-y-auto"
                   data-scroll-col
                 >
                   <h2 className="mb-0.5 text-xs font-bold text-slate-500">
@@ -594,7 +594,7 @@ export default function Board() {
                   </div>
                 </section>
 
-                <div className="overflow-y-auto" data-scroll-col>
+                <div className="lg:overflow-y-auto" data-scroll-col>
                   <RoomGrid
                     peopleByArea={peopleByArea}
                     allCount={allCount}
@@ -606,7 +606,7 @@ export default function Board() {
                     onSetPersonStatus={isEditor ? setPersonStatus : undefined}
                   />
                 </div>
-                <div className="overflow-y-auto" data-scroll-col>
+                <div className="lg:overflow-y-auto" data-scroll-col>
                   <ShiftColumns
                     peopleByArea={peopleByArea}
                     allCount={allCount}
@@ -616,7 +616,7 @@ export default function Board() {
                     onSetPersonStatus={isEditor ? setPersonStatus : undefined}
                   />
                 </div>
-                <div className="overflow-y-auto" data-scroll-col>
+                <div className="lg:overflow-y-auto" data-scroll-col>
                   <SpecialAreaPanel
                     peopleByArea={peopleByArea}
                     allCount={allCount}
@@ -628,7 +628,7 @@ export default function Board() {
                 </div>
               </div>
 
-              <div className="max-h-[22dvh] flex-none overflow-y-auto">
+              <div className="flex-none lg:max-h-[22dvh] lg:overflow-y-auto">
                 <UnassignedPool
                   unassignedPeople={unassignedFiltered}
                   totalUnassigned={totalUnassigned}
