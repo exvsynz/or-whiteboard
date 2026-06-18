@@ -21,6 +21,8 @@ vi.mock("@/lib/board-data", () => ({
 
 import { createDemoBackend } from "@/lib/backends/demo-backend";
 import { createSupabaseBackend } from "@/lib/backends/supabase-backend";
+import { createSharePointBackend } from "@/lib/backends/sharepoint-backend";
+import { createInMemoryGraphClient } from "@/test/in-memory-graph";
 import * as boardData from "@/lib/board-data";
 
 const TODAY = localDateString();
@@ -62,6 +64,60 @@ describe("BoardBackend contract", () => {
     expect(b.remote).not.toBeNull();
     expect(b.capabilities.serverGeneratedIds).toBe(true);
     expect(b.capabilities.realtime).toBe(true);
+  });
+
+  it("sharepoint backend conforms and has a remote writer", () => {
+    const b = createSharePointBackend(createInMemoryGraphClient(), {
+      assignmentsListId: "assign",
+      areaStatusListId: "areas",
+    });
+    expect(b.kind).toBe("sharepoint");
+    expect(b.remote).not.toBeNull();
+    expect(b.capabilities.serverGeneratedIds).toBe(true);
+    expect(b.capabilities.realtime).toBe(false);
+  });
+
+  // ---- sharepoint write round-trip (real adapter, in-memory Graph) ----
+  // The supabase writer is delegation-only above; SharePoint is the adapter
+  // whose write behaviour we can verify end-to-end without a tenant, so the
+  // cross-adapter contract's "writes persist and read back" lives here.
+
+  it("sharepoint writes persist and read back across the date filter", async () => {
+    const b = createSharePointBackend(createInMemoryGraphClient(), {
+      assignmentsListId: "assign",
+      areaStatusListId: "areas",
+    });
+    const added = await b.remote!.addPerson("王小明", "麻醉護理師", "bg-amber-100", TODAY);
+    await b.remote!.upsertAssignment(added.id, "R2", TODAY);
+
+    const roster = await b.fetchRoster(TODAY);
+    expect(roster).toEqual([
+      { id: added.id, name: "王小明", role: "麻醉護理師", color: "bg-amber-100", area: "R2", status: "assigned" },
+    ]);
+    // a write on one date does not leak onto another
+    expect(await b.fetchRoster(OTHER)).toEqual([]);
+  });
+
+  it("sharepoint upsert is idempotent — same (person, date) never duplicates a card", async () => {
+    const b = createSharePointBackend(createInMemoryGraphClient(), {
+      assignmentsListId: "assign",
+      areaStatusListId: "areas",
+    });
+    const added = await b.remote!.addPerson("林", "Leader", "bg-pink-100", TODAY);
+    await b.remote!.upsertAssignment(added.id, "R1", TODAY);
+    await b.remote!.upsertAssignment(added.id, "R1", TODAY);
+    expect(await b.fetchRoster(TODAY)).toHaveLength(1);
+  });
+
+  it("sharepoint replaceBoard adopts the roster and removing a missing row throws", async () => {
+    const b = createSharePointBackend(createInMemoryGraphClient(), {
+      assignmentsListId: "assign",
+      areaStatusListId: "areas",
+    });
+    const adopted = await b.remote!.replaceBoard(TODAY, [person("ignored", "R1")]);
+    expect(adopted).toHaveLength(1);
+    expect(adopted[0].id).not.toBe("ignored");
+    await expect(b.remote!.removePerson("ghost", TODAY)).rejects.toThrow();
   });
 
   // ---- demo read behavior (real localStorage) ----

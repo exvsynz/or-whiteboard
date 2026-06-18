@@ -90,10 +90,13 @@ describe("SharePointBackend (read, mocked Graph)", () => {
     expect(m.get("R1")).toEqual({ status: "surgery", note: "急刀" });
   });
 
-  it("remote writes reject as not-implemented (P4 pending)", async () => {
+  // Write behaviour (P4a, JOS-202) is covered against an in-memory Graph in
+  // sharepoint-backend.write.test.ts. Here we only assert the writer is wired
+  // up — it no longer rejects as not-implemented.
+  it("exposes a live remote writer (no P4 not-implemented stub)", async () => {
     const b = createSharePointBackend(mockGraph({}), CONFIG);
     await expect(
       b.remote!.upsertAssignment("p1", "R1", "2026-06-16"),
-    ).rejects.toThrow(/not implemented/i);
+    ).resolves.toBeUndefined();
   });
 });
