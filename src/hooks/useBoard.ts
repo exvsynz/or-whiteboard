@@ -147,6 +147,9 @@ export function useBoard(): UseBoardReturn {
   // pendingRef so applyPending can overlay them — otherwise a refetch
   // racing the upsert snaps the card back to its old area for a moment.
   const inFlightRef = useRef(new Map<string, PendingWrite>());
+  // Promises of writes currently on the network, so a destructive op can await
+  // them before mutating server state (drainWrites).
+  const inFlightPromisesRef = useRef(new Map<string, Promise<void>>());
   const playbackActiveRef = useRef(false);
   const saveStateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadedKeyRef = useRef<string | null>(null);
@@ -205,10 +208,50 @@ export function useBoard(): UseBoardReturn {
     }
   }, []);
 
+  // Flush a pending write and record its in-flight promise so destructive ops
+  // can await it (drainWrites). Self-clears from the map on completion.
+  const flushAndTrack = useCallback(
+    (personId: string): Promise<void> => {
+      const pr = flushWrite(personId);
+      inFlightPromisesRef.current.set(personId, pr);
+      void pr.finally(() => {
+        if (inFlightPromisesRef.current.get(personId) === pr) {
+          inFlightPromisesRef.current.delete(personId);
+        }
+      });
+      return pr;
+    },
+    [flushWrite],
+  );
+
   const flushAllWrites = useCallback(async (): Promise<void> => {
     const ids = [...pendingRef.current.keys()];
-    await Promise.all(ids.map((id) => flushWrite(id)));
-  }, [flushWrite]);
+    await Promise.all(ids.map((id) => flushAndTrack(id)));
+  }, [flushAndTrack]);
+
+  // Settle the optimistic move queue WITHOUT sending anything new, so a
+  // destructive server op (remove/import/reset) can't be overtaken by a stale
+  // upsert: cancel any still-pending (debounced) writes, then await any already
+  // in flight. Scope to one person, or drain everything when omitted.
+  const drainWrites = useCallback(
+    async (personId?: string): Promise<void> => {
+      const cancelIds = personId ? [personId] : [...pendingRef.current.keys()];
+      for (const id of cancelIds) {
+        const pending = pendingRef.current.get(id);
+        if (pending) {
+          clearTimeout(pending.timer);
+          pendingRef.current.delete(id);
+        }
+      }
+      const proms = personId
+        ? ([inFlightPromisesRef.current.get(personId)].filter(
+            Boolean,
+          ) as Promise<void>[])
+        : [...inFlightPromisesRef.current.values()];
+      await Promise.allSettled(proms);
+    },
+    [],
+  );
 
   const enqueueWrite = useCallback(
     (personId: string, prevArea: string | null, targetArea: string | null) => {
@@ -223,10 +266,13 @@ export function useBoard(): UseBoardReturn {
         prevArea: anchor ? anchor.prevArea : prevArea,
         targetArea,
         boardDate: boardDateRef.current,
-        timer: setTimeout(() => void flushWrite(personId), WRITE_DEBOUNCE_MS),
+        timer: setTimeout(
+          () => void flushAndTrack(personId),
+          WRITE_DEBOUNCE_MS,
+        ),
       });
     },
-    [flushWrite],
+    [flushAndTrack],
   );
 
   /** Overlay optimistic positions of pending and in-flight writes onto a
@@ -376,14 +422,14 @@ export function useBoard(): UseBoardReturn {
       if (loadedKey === boardDateRef.current) {
         saveBoard(boardDateRef.current, peopleRef.current);
       }
-      for (const id of pendingRef.current.keys()) void flushWrite(id);
+      for (const id of pendingRef.current.keys()) void flushAndTrack(id);
     };
     window.addEventListener("pagehide", flush);
     return () => {
       window.removeEventListener("pagehide", flush);
       flush();
     };
-  }, [loadedKey, flushWrite]);
+  }, [loadedKey, flushAndTrack]);
 
   // ---- actions ----
 
@@ -478,36 +524,47 @@ export function useBoard(): UseBoardReturn {
     setPeople((prev) => [...prev, person]);
   }, []);
 
-  const removePerson = useCallback((personId: string) => {
-    const person = peopleRef.current.find((p) => p.id === personId);
-    if (!person) return;
+  const removePerson = useCallback(
+    (personId: string) => {
+      const person = peopleRef.current.find((p) => p.id === personId);
+      if (!person) return;
 
-    setPeople((prev) => prev.filter((p) => p.id !== personId));
+      setPeople((prev) => prev.filter((p) => p.id !== personId));
 
-    if (remote) {
-      remote.removePerson(personId, boardDateRef.current)
-        .then(() => {
-          setLastSyncedAt(new Date());
-        })
-        .catch((err: unknown) => {
-          // Restore the card — the server still has it.
-          setPeople((prev) =>
-            prev.some((p) => p.id === personId) ? prev : [...prev, person],
-          );
-          setError(
-            `移除人員失敗: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        });
-      return;
-    }
-    logAuditEntry({
-      personId,
-      personName: person.name,
-      fromArea: person.area,
-      toArea: null,
-      actionType: "remove_person",
-    });
-  }, []);
+      if (remote) {
+        const date = boardDateRef.current;
+        void (async () => {
+          // Cancel this person's queued move and let any in-flight one land
+          // first, so a stale upsert can't resurrect the row after the delete.
+          await drainWrites(personId);
+          try {
+            await remote.removePerson(personId, date);
+            setLastSyncedAt(new Date());
+          } catch (err: unknown) {
+            // Restore the card — the server still has it — but only while we're
+            // still on that person's date (ids are global across dates).
+            if (boardDateRef.current === date) {
+              setPeople((prev) =>
+                prev.some((p) => p.id === personId) ? prev : [...prev, person],
+              );
+            }
+            setError(
+              `移除人員失敗: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+        })();
+        return;
+      }
+      logAuditEntry({
+        personId,
+        personName: person.name,
+        fromArea: person.area,
+        toArea: null,
+        actionType: "remove_person",
+      });
+    },
+    [drainWrites],
+  );
 
   const setPersonStatus = useCallback(
     (personId: string, status: AssignmentStatus) => {
@@ -521,9 +578,13 @@ export function useBoard(): UseBoardReturn {
         remote.setAssignmentStatus(personId, boardDateRef.current, status)
           .then(() => setLastSyncedAt(new Date()))
           .catch((err: unknown) => {
+            // Roll back only if our optimistic status is still the current one
+            // — a newer change must not be clobbered by this older failure.
             setPeople((prev) =>
               prev.map((p) =>
-                p.id === personId ? { ...p, status: prevStatus } : p,
+                p.id === personId && p.status === status
+                  ? { ...p, status: prevStatus }
+                  : p,
               ),
             );
             setError(
@@ -542,7 +603,12 @@ export function useBoard(): UseBoardReturn {
     ): Promise<BoardPerson[]> => {
       let adopted = newPeople;
       if (remote) {
-        adopted = await remote.replaceBoard(boardDateRef.current, newPeople);
+        const date = boardDateRef.current;
+        await drainWrites(); // settle the move queue before replacing the board
+        adopted = await remote.replaceBoard(date, newPeople);
+        // The user may have switched dates while replaceBoard was on the
+        // network — never render/cache date A's roster under date B.
+        if (boardDateRef.current !== date) return adopted;
         setLastSyncedAt(new Date());
       }
       setPeople(
@@ -553,24 +619,30 @@ export function useBoard(): UseBoardReturn {
       setError(null);
       return adopted;
     },
-    [],
+    [drainWrites],
   );
 
   const resetBoard = useCallback(() => {
     if (remote) {
+      const date = boardDateRef.current;
       // Clearing the date's roster server-side keeps every client in sync
       // (and the deletion is audited by the assignments trigger).
-      remote.replaceBoard(boardDateRef.current, [])
-        .then(() => {
-          setPeople([]);
-          setLastSyncedAt(new Date());
-        })
-        .catch((err: unknown) => {
+      clearBoard(date);
+      void (async () => {
+        await drainWrites(); // settle the move queue before replacing the board
+        try {
+          await remote.replaceBoard(date, []);
+          // Only clear the visible board if we're still on the date we reset.
+          if (boardDateRef.current === date) {
+            setPeople([]);
+            setLastSyncedAt(new Date());
+          }
+        } catch (err: unknown) {
           setError(
             `重置失敗: ${err instanceof Error ? err.message : String(err)}`,
           );
-        });
-      clearBoard(boardDateRef.current);
+        }
+      })();
       return;
     }
     clearBoard(boardDateRef.current);
@@ -580,7 +652,7 @@ export function useBoard(): UseBoardReturn {
     );
     setError(null);
     setLastSyncedAt(null);
-  }, []);
+  }, [drainWrites]);
 
   const saveNow = useCallback(async (): Promise<void> => {
     setSaveState("saving");
@@ -630,6 +702,12 @@ export function useBoard(): UseBoardReturn {
         remote.setAreaStatus(areaName, status, note).catch(
           (err: unknown) => {
             setAreaStatuses((current) => {
+              const cur = current.get(areaName);
+              // Roll back only if our optimistic value is still current — a
+              // newer area-status change must not be clobbered by this failure.
+              if (!cur || cur.status !== status || cur.note !== note) {
+                return current;
+              }
               const reverted = new Map(current);
               if (prev) reverted.set(areaName, prev);
               else reverted.delete(areaName);
