@@ -6,6 +6,22 @@
 export interface GraphListItem {
   id: string;
   fields: Record<string, unknown>;
+  /** The item's `@odata.etag`, used for If-Match optimistic concurrency (P4b). */
+  etag?: string;
+}
+
+/**
+ * Thrown when Graph rejects a conditional write (412 Precondition Failed or
+ * 409 Conflict) — the If-Match ETag no longer matches, i.e. the item changed
+ * underneath us. Callers catch this to re-read and reconcile.
+ */
+export class GraphConflictError extends Error {
+  readonly status: number;
+  constructor(status: number, detail: string) {
+    super(`Graph ${status} conflict: ${detail}`);
+    this.name = "GraphConflictError";
+    this.status = status;
+  }
 }
 
 export interface GraphClient {
@@ -21,8 +37,10 @@ export interface GraphClient {
     listId: string,
     itemId: string,
     fields: Record<string, unknown>,
+    /** When set, sent as `If-Match`; a stale ETag yields a GraphConflictError. */
+    etag?: string,
   ): Promise<void>;
-  deleteItem(listId: string, itemId: string): Promise<void>;
+  deleteItem(listId: string, itemId: string, etag?: string): Promise<void>;
 }
 
 export interface GraphClientConfig {
@@ -51,10 +69,23 @@ export function createGraphClient(config: GraphClientConfig): GraphClient {
     });
     if (!res.ok) {
       const detail = await res.text().catch(() => "");
+      // A failed precondition (stale If-Match ETag) is a distinct, recoverable
+      // case — surface it typed so the adapter can re-read and reconcile.
+      if (res.status === 412 || res.status === 409) {
+        throw new GraphConflictError(res.status, `${path}: ${detail}`);
+      }
       throw new Error(`Graph ${res.status} ${path}: ${detail}`);
     }
     return res;
   }
+
+  // Graph returns the ETag as the `@odata.etag` annotation on each item.
+  type RawItem = { id: string; fields: Record<string, unknown>; "@odata.etag"?: string };
+  const toItem = (raw: RawItem): GraphListItem => ({
+    id: raw.id,
+    fields: raw.fields,
+    etag: raw["@odata.etag"],
+  });
 
   return {
     async listItems(listId, options) {
@@ -64,8 +95,8 @@ export function createGraphClient(config: GraphClientConfig): GraphClient {
         path += `&$filter=${encodeURIComponent(options.filter)}`;
       }
       const res = await request(path);
-      const json = (await res.json()) as { value?: GraphListItem[] };
-      return json.value ?? [];
+      const json = (await res.json()) as { value?: RawItem[] };
+      return (json.value ?? []).map(toItem);
     },
 
     async createItem(listId, fields) {
@@ -73,18 +104,22 @@ export function createGraphClient(config: GraphClientConfig): GraphClient {
         method: "POST",
         body: JSON.stringify({ fields }),
       });
-      return (await res.json()) as GraphListItem;
+      return toItem((await res.json()) as RawItem);
     },
 
-    async updateItem(listId, itemId, fields) {
+    async updateItem(listId, itemId, fields, etag) {
       await request(`/lists/${listId}/items/${itemId}/fields`, {
         method: "PATCH",
         body: JSON.stringify(fields),
+        headers: etag ? { "If-Match": etag } : undefined,
       });
     },
 
-    async deleteItem(listId, itemId) {
-      await request(`/lists/${listId}/items/${itemId}`, { method: "DELETE" });
+    async deleteItem(listId, itemId, etag) {
+      await request(`/lists/${listId}/items/${itemId}`, {
+        method: "DELETE",
+        headers: etag ? { "If-Match": etag } : undefined,
+      });
     },
   };
 }
