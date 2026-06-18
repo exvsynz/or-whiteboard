@@ -59,12 +59,20 @@ import {
   fetchRoster,
   upsertAssignment,
   addPersonToRoster,
+  removeFromRoster,
+  replaceBoard,
+  setAssignmentStatus,
+  setAreaStatus,
 } from "@/lib/board-data";
 import { localDateString } from "@/lib/board-export";
 
 const mockFetchRoster = vi.mocked(fetchRoster);
 const mockUpsert = vi.mocked(upsertAssignment);
 const mockAddPerson = vi.mocked(addPersonToRoster);
+const mockRemove = vi.mocked(removeFromRoster);
+const mockReplace = vi.mocked(replaceBoard);
+const mockSetStatus = vi.mocked(setAssignmentStatus);
+const mockSetAreaStatus = vi.mocked(setAreaStatus);
 
 function person(id: string, area: string | null): BoardPerson {
   return {
@@ -270,5 +278,140 @@ describe("useBoard (Supabase mode, mocked data layer)", () => {
     });
     await new Promise((r) => setTimeout(r, 20));
     expect(result.current.people).toHaveLength(2);
+  });
+});
+
+describe("useBoard guards (JOS-204): non-move mutation correctness", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    fakeChannel.on.mockReturnValue(fakeChannel);
+    subscribeCallbacks.length = 0;
+    localStorage.clear();
+  });
+
+  // ---- defect 1: stale move write must not resurrect a removed/replaced row ----
+
+  it("removePerson cancels a pending move write so it can't resurrect the row", async () => {
+    const { result } = await renderLoaded([person("p1", "R1")]);
+    act(() => result.current.movePerson("p1", "R2")); // enqueues a debounced write
+    act(() => result.current.removePerson("p1")); // must cancel the pending write
+    mockRemove.mockResolvedValueOnce(undefined);
+    let saved!: Promise<void>;
+    act(() => {
+      saved = result.current.saveNow();
+    });
+    await act(async () => {
+      await saved;
+    });
+    expect(mockUpsert).not.toHaveBeenCalled(); // the pending write was never sent
+  });
+
+  it("removePerson issues its delete only after an in-flight move write settles", async () => {
+    const { result } = await renderLoaded([person("p1", "R1")]);
+    const upsert = deferred<void>();
+    mockUpsert.mockReturnValueOnce(upsert.promise);
+    act(() => result.current.movePerson("p1", "R2"));
+    let saved!: Promise<void>;
+    act(() => {
+      saved = result.current.saveNow(); // upsert now in flight
+    });
+    const remove = deferred<void>();
+    mockRemove.mockReturnValueOnce(remove.promise);
+    act(() => result.current.removePerson("p1"));
+
+    // While the upsert is still in flight, the delete must NOT have been issued
+    // — drainWrites is awaiting the in-flight write. (A plain wait here, with
+    // the upsert unresolved, is what gives this assertion teeth: a drain that
+    // failed to await would have let the delete through by now.)
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(mockRemove).not.toHaveBeenCalled();
+
+    // Once the upsert settles, the delete proceeds.
+    act(() => upsert.resolve());
+    await act(async () => {
+      await saved;
+    });
+    await waitFor(() => expect(mockRemove).toHaveBeenCalled());
+    act(() => remove.resolve());
+  });
+
+  // ---- defect 2: async callbacks must not land date A's result on date B ----
+
+  it("importPeople does not render date A's roster after a mid-flight date switch", async () => {
+    const { result } = await renderLoaded([person("p1", "R1")]);
+    const replace = deferred<BoardPerson[]>();
+    mockReplace.mockReturnValueOnce(replace.promise);
+    let imp!: Promise<BoardPerson[]>;
+    act(() => {
+      imp = result.current.importPeople([person("x", "R5")]);
+    });
+    mockFetchRoster.mockResolvedValueOnce([]);
+    act(() => result.current.setBoardDate(TOMORROW));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    act(() => replace.resolve([person("x", "R5")]));
+    await act(async () => {
+      await imp;
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(result.current.people).toHaveLength(0); // date B board untouched
+  });
+
+  it("resetBoard does not clear date B after a mid-flight date switch", async () => {
+    const { result } = await renderLoaded([person("p1", "R1")]);
+    const replace = deferred<BoardPerson[]>();
+    mockReplace.mockReturnValueOnce(replace.promise);
+    act(() => result.current.resetBoard());
+    mockFetchRoster.mockResolvedValueOnce([person("p2", "R9")]);
+    act(() => result.current.setBoardDate(TOMORROW));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.people[0]?.id).toBe("p2");
+    act(() => replace.resolve([]));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(result.current.people[0]?.id).toBe("p2"); // not cleared by date A's reset
+  });
+
+  it("a failed removePerson does not restore the person onto another date", async () => {
+    const { result } = await renderLoaded([person("p1", "R1")]);
+    const remove = deferred<void>();
+    mockRemove.mockReturnValueOnce(remove.promise);
+    act(() => result.current.removePerson("p1"));
+    mockFetchRoster.mockResolvedValueOnce([person("p2", "R9")]); // date B is distinct
+    act(() => result.current.setBoardDate(TOMORROW));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    act(() => remove.reject(new Error("boom")));
+    await new Promise((r) => setTimeout(r, 20));
+    // date A's p1 must NOT be restored onto date B's board
+    expect(result.current.people.map((p) => p.id)).toEqual(["p2"]);
+  });
+
+  // ---- defect 3: a failed status write must not clobber a newer status ----
+
+  it("a failed setPersonStatus does not revert a newer status change", async () => {
+    const { result } = await renderLoaded([person("p1", "R1")]);
+    const first = deferred<void>();
+    mockSetStatus.mockReturnValueOnce(first.promise);
+    act(() => result.current.setPersonStatus("p1", "relief")); // req1 in flight
+    mockSetStatus.mockResolvedValueOnce(undefined);
+    act(() => result.current.setPersonStatus("p1", "break")); // req2 wins
+    act(() => first.reject(new Error("boom")));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(result.current.people[0].status).toBe("break"); // not reverted to assigned
+  });
+
+  it("a failed updateAreaStatus does not revert a newer area status", async () => {
+    const { result } = await renderLoaded([]);
+    const first = deferred<void>();
+    mockSetAreaStatus.mockReturnValueOnce(first.promise);
+    act(() => result.current.updateAreaStatus("R1", "surgery", "a")); // req1 in flight
+    mockSetAreaStatus.mockResolvedValueOnce(undefined);
+    act(() => result.current.updateAreaStatus("R1", "cleaning", "b")); // req2 wins
+    act(() => first.reject(new Error("boom")));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(result.current.areaStatuses.get("R1")).toEqual({
+      status: "cleaning",
+      note: "b",
+    });
   });
 });
