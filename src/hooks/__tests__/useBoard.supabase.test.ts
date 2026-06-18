@@ -414,4 +414,22 @@ describe("useBoard guards (JOS-204): non-move mutation correctness", () => {
       note: "b",
     });
   });
+
+  it("a failed setPersonStatus does not roll back the same person on another date", async () => {
+    // p1 is rostered on BOTH dates (ids are global); on date B p1 already holds
+    // the SAME status value the failed date-A write was optimistically setting.
+    const { result } = await renderLoaded([person("p1", "R1")]); // date A, "assigned"
+    const first = deferred<void>();
+    mockSetStatus.mockReturnValueOnce(first.promise);
+    act(() => result.current.setPersonStatus("p1", "relief")); // date A write in flight
+    mockFetchRoster.mockResolvedValueOnce([
+      { ...person("p1", "R3"), status: "relief" }, // date B p1 legitimately "relief"
+    ]);
+    act(() => result.current.setBoardDate(TOMORROW));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    act(() => first.reject(new Error("boom"))); // date A write fails
+    await new Promise((r) => setTimeout(r, 20));
+    // date B's p1 must keep its own status — the date-A failure must not touch it
+    expect(result.current.people[0].status).toBe("relief");
+  });
 });

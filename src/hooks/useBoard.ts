@@ -575,18 +575,22 @@ export function useBoard(): UseBoardReturn {
         prev.map((p) => (p.id === personId ? { ...p, status } : p)),
       );
       if (remote) {
-        remote.setAssignmentStatus(personId, boardDateRef.current, status)
+        const date = boardDateRef.current;
+        remote.setAssignmentStatus(personId, date, status)
           .then(() => setLastSyncedAt(new Date()))
           .catch((err: unknown) => {
-            // Roll back only if our optimistic status is still the current one
-            // — a newer change must not be clobbered by this older failure.
-            setPeople((prev) =>
-              prev.map((p) =>
-                p.id === personId && p.status === status
-                  ? { ...p, status: prevStatus }
-                  : p,
-              ),
-            );
+            // Roll back only while we're still on that write's date AND our
+            // optimistic status is still current — never touch another date's
+            // board (ids are global) or clobber a newer change.
+            if (boardDateRef.current === date) {
+              setPeople((prev) =>
+                prev.map((p) =>
+                  p.id === personId && p.status === status
+                    ? { ...p, status: prevStatus }
+                    : p,
+                ),
+              );
+            }
             setError(
               `狀態更新失敗: ${err instanceof Error ? err.message : String(err)}`,
             );
