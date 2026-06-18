@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { createInMemoryGraphClient } from "@/test/in-memory-graph";
+import { GraphConflictError } from "@/lib/graph-client";
+import {
+  createInMemoryGraphClient,
+  createControllableGraphClient,
+} from "@/test/in-memory-graph";
 
 describe("in-memory GraphClient fake", () => {
   it("createItem mints an id and listItems returns the row", async () => {
@@ -82,5 +86,80 @@ describe("in-memory GraphClient fake", () => {
   it("throws on deleteItem for a missing id (like Graph 404)", async () => {
     const g = createInMemoryGraphClient();
     await expect(g.deleteItem("L", "nope")).rejects.toThrow();
+  });
+});
+
+describe("in-memory GraphClient fake — ETag / If-Match", () => {
+  it("createItem assigns an etag; updateItem bumps it", async () => {
+    const g = createInMemoryGraphClient();
+    const c = await g.createItem("L", { Area: "R1" });
+    expect(c.etag).toBeTruthy();
+    await g.updateItem("L", c.id, { Area: "R2" });
+    const [item] = await g.listItems("L");
+    expect(item.etag).not.toBe(c.etag);
+  });
+
+  it("updateItem with a matching If-Match etag succeeds", async () => {
+    const g = createInMemoryGraphClient();
+    const c = await g.createItem("L", { Area: "R1" });
+    await expect(
+      g.updateItem("L", c.id, { Area: "R2" }, c.etag),
+    ).resolves.toBeUndefined();
+  });
+
+  it("updateItem with a stale If-Match etag throws GraphConflictError", async () => {
+    const g = createInMemoryGraphClient();
+    const c = await g.createItem("L", { Area: "R1" });
+    await g.updateItem("L", c.id, { Area: "R2" }); // bumps etag; c.etag now stale
+    await expect(
+      g.updateItem("L", c.id, { Area: "R3" }, c.etag),
+    ).rejects.toBeInstanceOf(GraphConflictError);
+  });
+
+  it("deleteItem with a stale If-Match etag throws GraphConflictError", async () => {
+    const g = createInMemoryGraphClient();
+    const c = await g.createItem("L", { Area: "R1" });
+    await g.updateItem("L", c.id, { Area: "R2" });
+    await expect(
+      g.deleteItem("L", c.id, c.etag),
+    ).rejects.toBeInstanceOf(GraphConflictError);
+  });
+});
+
+describe("controllable GraphClient — gateNextWrite", () => {
+  it("parks the next write until release(), then executes it", async () => {
+    const { client, control } = createControllableGraphClient();
+    const gate = control.gateNextWrite();
+    let done = false;
+    const p = client.createItem("L", { x: 1 }).then(() => {
+      done = true;
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(done).toBe(false);
+    expect(await client.listItems("L")).toHaveLength(0); // not created yet
+    gate.release();
+    await p;
+    expect(done).toBe(true);
+    expect(await client.listItems("L")).toHaveLength(1);
+  });
+
+  it("fail() rejects the parked write and nothing is written", async () => {
+    const { client, control } = createControllableGraphClient();
+    const gate = control.gateNextWrite();
+    const p = client.createItem("L", { x: 1 });
+    gate.fail(new Error("boom"));
+    await expect(p).rejects.toThrow("boom");
+    expect(await client.listItems("L")).toHaveLength(0);
+  });
+
+  it("only gates the next write; subsequent writes pass through", async () => {
+    const { client, control } = createControllableGraphClient();
+    const gate = control.gateNextWrite();
+    const gated = client.createItem("L", { n: 1 }); // parked
+    await client.createItem("L", { n: 2 }); // immediate
+    expect(await client.listItems("L")).toHaveLength(1); // only the ungated one
+    gate.release();
+    await gated;
+    expect(await client.listItems("L")).toHaveLength(2);
   });
 });

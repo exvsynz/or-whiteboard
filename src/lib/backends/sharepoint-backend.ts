@@ -3,6 +3,7 @@ import type { AssignmentStatus } from "../database.types";
 import type { AreaStatusInfo } from "../board-types";
 import type { BoardBackend, RemoteBoardWriter } from "../board-backend";
 import type { GraphClient, GraphListItem } from "../graph-client";
+import { GraphConflictError } from "../graph-client";
 
 export interface SharePointConfig {
   /** SharePoint list id holding per-(person, date) assignment rows. */
@@ -28,6 +29,14 @@ const AREA_F = { name: "AreaName", status: "Status", note: "Note" } as const;
 function str(v: unknown): string {
   return typeof v === "string" ? v : v == null ? "" : String(v);
 }
+
+/** True for a Graph "item gone" error — tolerated when a co-racer beat us to it. */
+function is404(err: unknown): boolean {
+  return err instanceof Error && err.message.includes("404");
+}
+
+// Bounded retries when an If-Match PATCH loses to a concurrent writer.
+const MAX_CONFLICT_RETRIES = 3;
 
 /** Map an Assignments list item to the domain BoardPerson. Exported for tests. */
 export function assignmentItemToPerson(item: GraphListItem): BoardPerson {
@@ -94,19 +103,64 @@ export function createSharePointBackend(
     return items[0] ?? null;
   }
 
+  // SharePoint Lists have no composite-unique on (PersonId, BoardDate) — that
+  // enforcement is the tenant-side indexed column at P2/JOS-166. Offline, a
+  // concurrent insert race can briefly leave two rows for one key; collapse
+  // them deterministically (keep the lowest item id) so the board never shows
+  // a duplicate card. Idempotent: a co-racer's delete (404) is fine.
+  async function reconcileDuplicates(
+    personId: string,
+    boardDate: string,
+  ): Promise<void> {
+    const rows = await graph.listItems(config.assignmentsListId, {
+      filter: assignFilter(personId, boardDate),
+    });
+    if (rows.length <= 1) return;
+    const keep = rows.reduce((a, b) => (a.id <= b.id ? a : b));
+    for (const row of rows) {
+      if (row.id === keep.id) continue;
+      try {
+        await graph.deleteItem(config.assignmentsListId, row.id);
+      } catch (err) {
+        if (!is404(err)) throw err;
+      }
+    }
+  }
+
   const remote: RemoteBoardWriter = {
     async upsertAssignment(personId, areaName, boardDate, status) {
       const area = areaName ?? "";
-      const existing = await findAssignment(personId, boardDate);
-      if (existing) {
-        // Update path: set Area; touch Status only when supplied, so a plain
-        // move never resets a break/relief person (mirrors board-data's upsert,
-        // which omits status from the payload when undefined).
-        const fields: Record<string, unknown> = { [F.area]: area };
-        if (status !== undefined) fields[F.status] = status;
-        await graph.updateItem(config.assignmentsListId, existing.id, fields);
-        return;
+      const buildFields = () => {
+        // Set Area; touch Status only when supplied, so a plain move never
+        // resets a break/relief person (mirrors board-data's upsert, which
+        // omits status from the payload when undefined).
+        const f: Record<string, unknown> = { [F.area]: area };
+        if (status !== undefined) f[F.status] = status;
+        return f;
+      };
+
+      // Update path with optimistic concurrency: PATCH under the row's If-Match
+      // etag; if a concurrent writer won, re-read the latest and re-apply our
+      // change (bounded retries) rather than clobbering it.
+      for (let attempt = 0; attempt <= MAX_CONFLICT_RETRIES; attempt++) {
+        const existing = await findAssignment(personId, boardDate);
+        if (!existing) break; // no row yet -> insert path below
+        try {
+          await graph.updateItem(
+            config.assignmentsListId,
+            existing.id,
+            buildFields(),
+            existing.etag,
+          );
+          return;
+        } catch (err) {
+          if (err instanceof GraphConflictError && attempt < MAX_CONFLICT_RETRIES) {
+            continue; // re-read on the next loop and retry
+          }
+          throw err;
+        }
       }
+
       // Insert path: the denormalised row also needs the identity columns, so
       // copy them from another date's row for this person when one exists.
       const idf = (await findAnyByPerson(personId))?.fields ?? {};
@@ -119,6 +173,8 @@ export function createSharePointBackend(
         [F.status]: status ?? "assigned",
         [F.boardDate]: boardDate,
       });
+      // A concurrent insert for the same key may have raced us — collapse.
+      await reconcileDuplicates(personId, boardDate);
     },
 
     async setAssignmentStatus(personId, boardDate, status) {
