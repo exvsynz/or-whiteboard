@@ -124,6 +124,8 @@ export interface GraphControl {
    * the returned handle's release()/fail() is called. Reads pass through.
    */
   gateNextWrite(): WriteGate;
+  /** Make the NEXT listItems read reject once (simulate a failed poll/refetch). */
+  failNext(): void;
   /** Replace the backing store (and clear any armed gate) — re-seed per test. */
   reset(seed?: Record<string, GraphListItem[]>): void;
 }
@@ -142,6 +144,7 @@ export function createControllableGraphClient(
 ): { client: GraphClient; control: GraphControl } {
   let base = createInMemoryGraphClient(seed);
   let armed: InternalGate | null = null;
+  let failNextRead = false;
 
   function gate<T>(run: () => Promise<T>): Promise<T> {
     const h = armed;
@@ -182,14 +185,24 @@ export function createControllableGraphClient(
         },
       };
     },
+    failNext() {
+      failNextRead = true;
+    },
     reset(newSeed = {}) {
       base = createInMemoryGraphClient(newSeed);
       armed = null;
+      failNextRead = false;
     },
   };
 
   const client: GraphClient = {
-    listItems: (listId, options) => base.listItems(listId, options),
+    listItems: (listId, options) => {
+      if (failNextRead) {
+        failNextRead = false;
+        return Promise.reject(new Error("in-memory fake: poll read failed"));
+      }
+      return base.listItems(listId, options);
+    },
     createItem: (listId, fields) => gate(() => base.createItem(listId, fields)),
     updateItem: (listId, itemId, fields, etag) =>
       gate(() => base.updateItem(listId, itemId, fields, etag)),

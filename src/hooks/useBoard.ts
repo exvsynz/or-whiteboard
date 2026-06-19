@@ -753,12 +753,29 @@ export function useBoard(): UseBoardReturn {
     return map;
   }, [filteredPeople]);
 
+  // A remote poll-backend (SharePoint) has no realtime channel to report
+  // status, so derive it from poll health: "connecting" until the first load,
+  // then "connected"/"disconnected" by whether the latest refetch is stale.
+  // Realtime backends keep their channel-driven status. Demo and SharePoint
+  // are both realtime:false, so `remote` (not `realtime`) is what tells them
+  // apart — demo (remote === null) stays "local".
+  const pollAwareConnectionStatus: ConnectionStatus = backend.capabilities
+    .realtime
+    ? connectionStatus
+    : remote
+      ? loadedKey === null
+        ? "connecting"
+        : isStale
+          ? "disconnected"
+          : "connected"
+      : "local";
+
   return {
     people,
     isLoading,
     error,
     lastSyncedAt,
-    connectionStatus,
+    connectionStatus: pollAwareConnectionStatus,
     saveState,
     isStale,
     boardDate,

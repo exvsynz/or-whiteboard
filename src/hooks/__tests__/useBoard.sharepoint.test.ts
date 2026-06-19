@@ -24,6 +24,8 @@ vi.mock("@/lib/backend-config", async () => {
 
 import { useBoard } from "@/hooks/useBoard";
 import type { GraphControl } from "@/test/in-memory-graph";
+import { createControllableGraphClient } from "@/test/in-memory-graph";
+import { createSharePointBackend } from "@/lib/backends/sharepoint-backend";
 
 const control = () => h.control as GraphControl;
 const TODAY = localDateString();
@@ -136,5 +138,61 @@ describe("useBoard against the SharePoint adapter — write-queue/rollback invar
 
     // the new person belongs to TODAY's roster, not TOMORROW's board
     expect(result.current.people).toHaveLength(0);
+  });
+});
+
+describe("useBoard SharePoint poll health → connectionStatus (JOS-205)", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it("derives live connection status from poll health (never stuck at 'local')", async () => {
+    seed([row("a1", "p1", "R1", TODAY)]);
+    const { result } = await renderLoaded();
+    // a remote poll-backend that has loaded is "connected", not "local"
+    expect(result.current.connectionStatus).toBe("connected");
+
+    // a failed poll refetch -> "disconnected"
+    control().failNext();
+    act(() => result.current.setPlaybackActive(false)); // triggers a refetch via scheduleRefetch
+    await waitFor(() =>
+      expect(result.current.connectionStatus).toBe("disconnected"),
+    );
+
+    // recovers on the next good poll
+    act(() => result.current.setPlaybackActive(false));
+    await waitFor(() =>
+      expect(result.current.connectionStatus).toBe("connected"),
+    );
+  });
+
+  it("loads the roster from the server (the fake), not localStorage", async () => {
+    // seed a DECOY roster into the cache; the SharePoint backend has no
+    // localStorage path, so the server (fake) roster must win.
+    localStorage.setItem(
+      `board:${TODAY}`,
+      JSON.stringify([{ id: "decoy", name: "x", role: "x", color: "x", area: "R9", status: "assigned" }]),
+    );
+    seed([row("a1", "p1", "R1", TODAY)]);
+    const { result } = await renderLoaded();
+    expect(result.current.people.map((p) => p.id)).toEqual(["p1"]);
+  });
+
+  it("subscribe() adds no second poll (no double-fetch) — it is a read-free no-op", () => {
+    // The hook's kiosk poll is the single freshness source; subscribe() must
+    // not fetch (which would double the 60s polling).
+    const { client } = createControllableGraphClient({ assign: [], areas: [] });
+    const spy = vi.spyOn(client, "listItems");
+    const backend = createSharePointBackend(client, {
+      assignmentsListId: "assign",
+      areaStatusListId: "areas",
+    });
+    const unsub = backend.subscribe(TODAY, {
+      onChange: vi.fn(),
+      onStatus: vi.fn(),
+    });
+    expect(typeof unsub).toBe("function");
+    expect(spy).not.toHaveBeenCalled();
+    unsub();
   });
 });
