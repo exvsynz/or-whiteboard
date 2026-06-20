@@ -11,6 +11,7 @@ import type { BoardPerson } from "@/lib/board-constants";
 import type { AssignmentStatus, RoomStatus } from "@/lib/database.types";
 import {
   loadBoard,
+  loadAreaStatuses,
   saveBoard,
   clearBoard,
   saveAreaStatuses,
@@ -149,7 +150,7 @@ export function useBoard(): UseBoardReturn {
   const inFlightRef = useRef(new Map<string, PendingWrite>());
   // Promises of writes currently on the network, so a destructive op can await
   // them before mutating server state (drainWrites).
-  const inFlightPromisesRef = useRef(new Map<string, Promise<void>>());
+  const inFlightPromisesRef = useRef(new Map<string, Promise<boolean>>());
   const playbackActiveRef = useRef(false);
   const saveStateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadedKeyRef = useRef<string | null>(null);
@@ -159,12 +160,15 @@ export function useBoard(): UseBoardReturn {
 
   // ---- pending-write helpers ----
 
-  const flushWrite = useCallback(async (personId: string): Promise<void> => {
+  // Resolves true when the write succeeded (or there was nothing to send),
+  // false when the upsert failed and rolled back — saveNow uses this so it
+  // never reports "已儲存" after a failed write.
+  const flushWrite = useCallback(async (personId: string): Promise<boolean> => {
     const entry = pendingRef.current.get(personId);
-    if (!entry) return;
+    if (!entry) return true;
     pendingRef.current.delete(personId);
     clearTimeout(entry.timer);
-    if (!remote) return;
+    if (!remote) return true;
     inFlightRef.current.set(personId, entry);
     try {
       await remote.upsertAssignment(
@@ -181,6 +185,7 @@ export function useBoard(): UseBoardReturn {
       }
       setLastSyncedAt(new Date());
       setError(null);
+      return true;
     } catch (err) {
       // Roll back ONLY this person — restoring a whole-board snapshot
       // would wipe unrelated edits made in the meantime. Guard against:
@@ -199,6 +204,7 @@ export function useBoard(): UseBoardReturn {
       setError(
         `移動失敗: ${err instanceof Error ? err.message : String(err)}`,
       );
+      return false;
     } finally {
       // A newer enqueue for the same person may have landed while this
       // write was in flight — only clear our own entry.
@@ -211,7 +217,7 @@ export function useBoard(): UseBoardReturn {
   // Flush a pending write and record its in-flight promise so destructive ops
   // can await it (drainWrites). Self-clears from the map on completion.
   const flushAndTrack = useCallback(
-    (personId: string): Promise<void> => {
+    (personId: string): Promise<boolean> => {
       const pr = flushWrite(personId);
       inFlightPromisesRef.current.set(personId, pr);
       void pr.finally(() => {
@@ -224,9 +230,11 @@ export function useBoard(): UseBoardReturn {
     [flushWrite],
   );
 
-  const flushAllWrites = useCallback(async (): Promise<void> => {
+  // True when every flushed write succeeded (vacuously true with none pending).
+  const flushAllWrites = useCallback(async (): Promise<boolean> => {
     const ids = [...pendingRef.current.keys()];
-    await Promise.all(ids.map((id) => flushAndTrack(id)));
+    const results = await Promise.all(ids.map((id) => flushAndTrack(id)));
+    return results.every(Boolean);
   }, [flushAndTrack]);
 
   // Settle the optimistic move queue WITHOUT sending anything new, so a
@@ -246,7 +254,7 @@ export function useBoard(): UseBoardReturn {
       const proms = personId
         ? ([inFlightPromisesRef.current.get(personId)].filter(
             Boolean,
-          ) as Promise<void>[])
+          ) as Promise<boolean>[])
         : [...inFlightPromisesRef.current.values()];
       await Promise.allSettled(proms);
     },
@@ -259,9 +267,14 @@ export function useBoard(): UseBoardReturn {
       if (existing) clearTimeout(existing.timer);
       // Anchor the rollback to the last server-confirmed area: an earlier
       // pending/in-flight entry's prevArea wins over the current optimistic
-      // position.
+      // position — but ONLY when it belongs to the current board date. Person
+      // ids are global across dates, so a stale date-A anchor would otherwise
+      // roll a failed date-B move back to a date-A area.
+      const candidate = existing ?? inFlightRef.current.get(personId);
       const anchor =
-        existing ?? inFlightRef.current.get(personId) ?? undefined;
+        candidate && candidate.boardDate === boardDateRef.current
+          ? candidate
+          : undefined;
       pendingRef.current.set(personId, {
         prevArea: anchor ? anchor.prevArea : prevArea,
         targetArea,
@@ -323,9 +336,13 @@ export function useBoard(): UseBoardReturn {
           setError(null);
         } catch (err) {
           if (cancelled) return;
-          // Offline fallback: show the cached board, clearly marked stale.
+          // Offline fallback: show the cached board + statuses, clearly marked
+          // stale. Area statuses are cached separately, so restore them too —
+          // otherwise room badges/notes vanish on a reconnect failure even
+          // though they're sitting in local storage.
           const stored = loadBoard(boardDate);
           setPeople(stored?.people ?? []);
+          setAreaStatuses(loadAreaStatuses());
           setIsStale(true);
           setError(
             `無法連線到伺服器，顯示快取資料 (${err instanceof Error ? err.message : String(err)})`,
@@ -665,7 +682,13 @@ export function useBoard(): UseBoardReturn {
     if (loadedKeyRef.current === boardDateRef.current) {
       saveBoard(boardDateRef.current, peopleRef.current);
     }
-    await flushAllWrites();
+    const ok = await flushAllWrites();
+    // Only claim "已儲存" when every flushed write actually succeeded — a failed
+    // upsert sets `error` and rolls back, so reporting "saved" would be a lie.
+    if (!ok) {
+      setSaveState("idle");
+      return;
+    }
     setSaveState("saved");
     if (saveStateTimerRef.current) clearTimeout(saveStateTimerRef.current);
     saveStateTimerRef.current = setTimeout(() => setSaveState("idle"), 2000);

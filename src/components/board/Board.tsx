@@ -240,7 +240,11 @@ export default function Board() {
       // fresh import — stop it first.
       playbackRef.current.stop();
       setPlaybackSteps([]);
-      if (animated) setPlaybackActive(true);
+      // Reset playback-active for THIS import: enable only for a new animated
+      // import. A non-animated import during a running playback must clear the
+      // flag, else playbackActiveRef stays true and refetch early-returns
+      // forever.
+      setPlaybackActive(animated);
       try {
         const adopted = await importPeople(imported, {
           displayUnassigned: animated,

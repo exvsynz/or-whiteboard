@@ -65,6 +65,7 @@ import {
   setAreaStatus,
 } from "@/lib/board-data";
 import { localDateString } from "@/lib/board-export";
+import { saveBoard, saveAreaStatuses } from "@/lib/board-storage";
 
 const mockFetchRoster = vi.mocked(fetchRoster);
 const mockUpsert = vi.mocked(upsertAssignment);
@@ -431,5 +432,129 @@ describe("useBoard guards (JOS-204): non-move mutation correctness", () => {
     await new Promise((r) => setTimeout(r, 20));
     // date B's p1 must keep its own status — the date-A failure must not touch it
     expect(result.current.people[0].status).toBe("relief");
+  });
+});
+
+describe("useBoard (JOS-207): async-correctness round 2", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    fakeChannel.on.mockReturnValue(fakeChannel);
+    subscribeCallbacks.length = 0;
+    localStorage.clear();
+  });
+
+  // ---- bug 1: cross-date rollback anchor must not reuse a stale in-flight entry ----
+
+  it("a failed cross-date move rolls back to the current date's prev area, not a stale in-flight anchor", async () => {
+    // p1 on date A at R1; its move goes in flight (person ids are global across dates).
+    const { result } = await renderLoaded([person("p1", "R1")]);
+    const upsertA = deferred<void>();
+    mockUpsert.mockReturnValueOnce(upsertA.promise);
+    act(() => result.current.movePerson("p1", "R2"));
+
+    // Switch to date B, where p1 sits at R5. The date-A write is still in flight,
+    // so inFlightRef holds a date-A anchor whose prevArea is R1.
+    mockFetchRoster.mockResolvedValueOnce([person("p1", "R5")]);
+    act(() => result.current.setBoardDate(TOMORROW));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.people[0].area).toBe("R5");
+
+    // Move p1 on date B, then let that write fail.
+    const upsertB = deferred<void>();
+    mockUpsert.mockReturnValueOnce(upsertB.promise);
+    act(() => result.current.movePerson("p1", "R3"));
+    let saved!: Promise<void>;
+    act(() => {
+      saved = result.current.saveNow();
+    });
+    act(() => upsertB.reject(new Error("network down")));
+    await act(async () => {
+      await saved;
+    });
+
+    // Rollback must restore date B's prev area (R5) — NOT the stale date-A anchor (R1).
+    expect(result.current.people[0].area).toBe("R5");
+    expect(result.current.error).toContain("移動失敗");
+    act(() => upsertA.resolve());
+  });
+
+  // ---- bug 2: offline load fallback must restore cached area statuses too ----
+
+  it("a failed reconnect load keeps cached area statuses, not just the roster", async () => {
+    // Seed the local cache with a board AND area statuses for today.
+    saveBoard(TODAY, [person("p1", "R1")]);
+    saveAreaStatuses(new Map([["R1", { status: "surgery", note: "手術中" }]]));
+    // The remote load fails → the offline fallback (catch) path runs.
+    mockFetchRoster.mockRejectedValueOnce(new Error("offline"));
+
+    const { result } = renderHook(() => useBoard());
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current.isStale).toBe(true);
+    expect(result.current.people.map((p) => p.id)).toEqual(["p1"]); // roster from cache
+    // Area statuses must ALSO be restored from cache, not silently dropped.
+    expect(result.current.areaStatuses.get("R1")).toEqual({
+      status: "surgery",
+      note: "手術中",
+    });
+  });
+
+  // ---- bug 3: saveNow must not report success when a flushed write failed ----
+
+  it("saveNow does not report 'saved' when a flushed write failed", async () => {
+    const { result } = await renderLoaded([person("p1", "R1")]);
+    const upsert = deferred<void>();
+    mockUpsert.mockReturnValueOnce(upsert.promise);
+    act(() => result.current.movePerson("p1", "R2"));
+    let saved!: Promise<void>;
+    act(() => {
+      saved = result.current.saveNow();
+    });
+    expect(result.current.saveState).toBe("saving");
+    act(() => upsert.reject(new Error("network down")));
+    await act(async () => {
+      await saved;
+    });
+    // The write failed + rolled back — the UI must not claim "已儲存".
+    expect(result.current.saveState).toBe("idle");
+    expect(result.current.error).toContain("移動失敗");
+  });
+
+  it("saveNow reports 'saved' when all flushed writes succeed", async () => {
+    const { result } = await renderLoaded([person("p1", "R1")]);
+    mockUpsert.mockResolvedValueOnce(undefined);
+    act(() => result.current.movePerson("p1", "R2"));
+    let saved!: Promise<void>;
+    act(() => {
+      saved = result.current.saveNow();
+    });
+    await act(async () => {
+      await saved;
+    });
+    expect(result.current.saveState).toBe("saved");
+  });
+
+  // ---- bug 4 (gate wiring): clearing playback re-enables refetch ----
+  // The Board-level test pins that a non-animated import calls
+  // setPlaybackActive(false); this pins the OTHER half of the chain at the hook
+  // layer — that clearing the flag actually lets a refetch land again — so the
+  // end-to-end "import un-sticks refetch" behaviour can't silently rot if the
+  // two halves are ever decoupled.
+
+  it("suppresses a refetch while playback is active and resumes once it is cleared", async () => {
+    const { result } = await renderLoaded([person("p1", "R1")]);
+
+    // Playback active (as a running import animation leaves it): an incoming
+    // remote change must NOT refetch over the locally-driven board.
+    act(() => result.current.setPlaybackActive(true));
+    mockFetchRoster.mockResolvedValueOnce([person("p1", "R9")]); // lands iff refetch runs
+    act(() => subscribeCallbacks.at(-1)?.("SUBSCRIBED"));
+    await new Promise((r) => setTimeout(r, 350)); // let the 300ms debounce fire
+    expect(result.current.people[0].area).toBe("R1"); // refetch suppressed
+
+    // Clearing playback (what bug-4's non-animated-import fix does) schedules a
+    // refetch that now lands the queued roster.
+    act(() => result.current.setPlaybackActive(false));
+    await waitFor(() => expect(result.current.people[0].area).toBe("R9"));
   });
 });
