@@ -44,3 +44,9 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npx playwright test --project=chromium
+        # Playwright's webServer runs `npm run dev`; CI has no `.env.local`
+        # (gitignored, demo-only), so without this the app boots unconfigured
+        # (neither Supabase nor demo) and the board never renders — all e2e
+        # fail. Demo mode matches the local `.env.local` baseline.
+        env:
+          NEXT_PUBLIC_DEMO_MODE: "true"
