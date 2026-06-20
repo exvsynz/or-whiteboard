@@ -125,4 +125,54 @@ describe("HistoryDrawer", () => {
     createSpy.mockRestore();
     clickSpy.mockRestore();
   });
+
+  it("escapes injection-bearing staff names in the exported CSV", async () => {
+    auditState.entries = [
+      {
+        personId: "p1",
+        personName: "張,大明",
+        fromArea: "R1",
+        toArea: "R2",
+        actionType: "reassign",
+        userId: null,
+        timestamp: new Date("2026-06-12T01:00:00Z"),
+      },
+      {
+        personId: "p1",
+        personName: "=cmd",
+        fromArea: null,
+        toArea: "R1",
+        actionType: "assign",
+        userId: null,
+        timestamp: new Date("2026-06-12T00:00:00Z"),
+      },
+    ] satisfies AuditEntry[];
+
+    let capturedBlob: Blob | null = null;
+    URL.createObjectURL = vi.fn((blob: Blob | MediaSource) => {
+      capturedBlob = blob as Blob;
+      return "blob:mock";
+    });
+    URL.revokeObjectURL = vi.fn();
+    const clickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {});
+
+    render(<HistoryDrawer person={person} onClose={() => {}} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "匯出 CSV" }));
+
+    expect(capturedBlob).not.toBeNull();
+    const bytes = new Uint8Array(
+      await (capturedBlob as unknown as Blob).arrayBuffer(),
+    );
+    const text = new TextDecoder().decode(bytes.slice(3));
+    const lines = text.split("\n");
+    // Comma-bearing name is quoted → stays a single CSV cell
+    expect(lines[1]).toContain('"張,大明"');
+    // Leading "=" name is prefixed with a single quote → not a formula
+    expect(lines[2].split(",")[1]).toBe("'=cmd");
+
+    clickSpy.mockRestore();
+  });
 });

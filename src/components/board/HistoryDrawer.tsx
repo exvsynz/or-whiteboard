@@ -4,6 +4,7 @@ import { memo, useCallback, useEffect, useRef } from "react";
 import { useAuditLog } from "@/hooks/useAuditLog";
 import type { BoardPerson } from "@/lib/board-constants";
 import { downloadCSV } from "@/lib/board-export";
+import { toCsvRow } from "@/lib/csv";
 import { Button } from "@/components/ui/button";
 
 interface HistoryDrawerProps {
@@ -75,14 +76,14 @@ function HistoryDrawerInner({ person, onClose }: HistoryDrawerProps) {
     if (!person) return;
     const headers = "Timestamp,Person,From,To,Action,User";
     const rows = entries.map((e) =>
-      [
+      toCsvRow([
         e.timestamp.toISOString(),
         e.personName || person.name,
         e.fromArea ?? "未分派",
         e.toArea ?? "未分派",
         e.actionType,
         e.userId ?? "demo",
-      ].join(","),
+      ]),
     );
     downloadCSV([headers, ...rows].join("\n"), `audit-log-${person.name}.csv`);
   }, [entries, person]);
