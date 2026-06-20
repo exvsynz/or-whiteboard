@@ -57,6 +57,7 @@ vi.mock("@/lib/board-data", () => ({
 import { useBoard } from "../useBoard";
 import {
   fetchRoster,
+  fetchAreaStatuses,
   upsertAssignment,
   addPersonToRoster,
   removeFromRoster,
@@ -74,6 +75,7 @@ const mockRemove = vi.mocked(removeFromRoster);
 const mockReplace = vi.mocked(replaceBoard);
 const mockSetStatus = vi.mocked(setAssignmentStatus);
 const mockSetAreaStatus = vi.mocked(setAreaStatus);
+const mockFetchAreaStatuses = vi.mocked(fetchAreaStatuses);
 
 function person(id: string, area: string | null): BoardPerson {
   return {
@@ -493,6 +495,29 @@ describe("useBoard (JOS-207): async-correctness round 2", () => {
     expect(result.current.isStale).toBe(true);
     expect(result.current.people.map((p) => p.id)).toEqual(["p1"]); // roster from cache
     // Area statuses must ALSO be restored from cache, not silently dropped.
+    expect(result.current.areaStatuses.get("R1")).toEqual({
+      status: "surgery",
+      note: "手術中",
+    });
+  });
+
+  it("caches area statuses on a successful remote load so a later failed load can restore them", async () => {
+    // Nothing pre-seeded in localStorage — remote mode must cache the server's
+    // statuses itself (it never wrote that cache before this fix).
+    mockFetchAreaStatuses.mockResolvedValueOnce(
+      new Map([["R1", { status: "surgery", note: "手術中" }]]),
+    );
+    const { result } = await renderLoaded([person("p1", "R1")]);
+    expect(result.current.areaStatuses.get("R1")).toEqual({
+      status: "surgery",
+      note: "手術中",
+    });
+
+    // A later per-date load fails (reconnect blip). The statuses must survive,
+    // restored from the cache the successful load wrote.
+    mockFetchRoster.mockRejectedValueOnce(new Error("offline"));
+    act(() => result.current.setBoardDate(TOMORROW));
+    await waitFor(() => expect(result.current.isStale).toBe(true));
     expect(result.current.areaStatuses.get("R1")).toEqual({
       status: "surgery",
       note: "手術中",

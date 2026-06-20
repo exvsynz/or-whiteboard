@@ -708,11 +708,15 @@ export function useBoard(): UseBoardReturn {
     [scheduleRefetch],
   );
 
-  // Demo mode: persist statuses whenever they change — they would
-  // otherwise vanish on reload. (Effect-based so updateAreaStatus can use
-  // a functional update without losing batched changes.)
+  // Persist statuses to the local cache whenever they change. In demo this is
+  // the only store; in remote mode it mirrors the roster cache (saveBoard) so
+  // the offline fallback can restore room badges/notes on a reconnect failure —
+  // remote statuses live server-side, but without this local mirror the
+  // offline catch would have nothing to restore. (Effect-based so
+  // updateAreaStatus can use a functional update without losing batched
+  // changes.)
   useEffect(() => {
-    if (!remote && loadedKey !== null) {
+    if (loadedKey !== null) {
       saveAreaStatuses(areaStatuses);
     }
   }, [areaStatuses, loadedKey]);

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, act, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { BoardPerson } from "@/lib/board-constants";
@@ -13,10 +13,21 @@ vi.mock("@/lib/supabase-client", () => ({
 // Capture the playback-flag toggles + import calls Board makes. The refetch
 // "stuck disabled" symptom only manifests in remote mode (demo refetch no-ops),
 // so we assert handleImport's contract directly via a mocked useBoard.
-const mocks = vi.hoisted(() => ({
-  setPlaybackActive: vi.fn(),
-  importPeople: vi.fn(async (): Promise<BoardPerson[]> => []),
-}));
+// importPeople is a deferred so a test can assert the ordering of
+// setPlaybackActive relative to the import commit (the race fix).
+const mocks = vi.hoisted(() => {
+  const state = { resolveImport: null as null | ((v: unknown[]) => void) };
+  return {
+    setPlaybackActive: vi.fn(),
+    importPeople: vi.fn(
+      () =>
+        new Promise<unknown[]>((res) => {
+          state.resolveImport = res;
+        }),
+    ),
+    state,
+  };
+});
 
 vi.mock("@/hooks/useBoard", () => {
   // A single stable return value so Board's effects don't churn on identity.
@@ -82,16 +93,28 @@ beforeEach(() => {
 });
 
 describe("Board import × playback (JOS-207 bug 4)", () => {
-  it("a non-animated import clears playback-active so refetch is re-enabled", async () => {
+  it("a non-animated import clears playback only AFTER the import commits (no stale-refetch race)", async () => {
     // A prior animated import may have left playbackActive true; a plain import
-    // must reset it, else refetch early-returns forever.
+    // must reset it so refetch resumes — but only ONCE the import has committed.
+    // Clearing it early calls setPlaybackActive(false) -> scheduleRefetch, which
+    // would race replaceBoard and could paint stale data over the fresh import.
     const user = userEvent.setup();
     renderBoard();
     await user.click(await screen.findByText("trigger-plain-import"));
-    expect(mocks.setPlaybackActive).toHaveBeenCalledWith(false);
+    // Import still in flight: the flag must NOT have been touched yet.
+    expect(mocks.setPlaybackActive).not.toHaveBeenCalled();
+    // Once the import commits, the flag is cleared (re-enabling refetch).
+    await act(async () => {
+      mocks.state.resolveImport?.([]);
+    });
+    await waitFor(() =>
+      expect(mocks.setPlaybackActive).toHaveBeenCalledWith(false),
+    );
   });
 
-  it("an animated import enables playback-active", async () => {
+  it("an animated import enables playback before importing", async () => {
+    // Animated imports drive the board locally, so suppression is enabled
+    // up-front (synchronously, before the import is awaited).
     const user = userEvent.setup();
     renderBoard();
     await user.click(await screen.findByText("trigger-animated-import"));
