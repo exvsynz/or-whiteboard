@@ -240,6 +240,11 @@ export default function Board() {
       // fresh import — stop it first.
       playbackRef.current.stop();
       setPlaybackSteps([]);
+      // Enable playback suppression up-front ONLY for a new animated import
+      // (its animation drives the board locally). For a plain import the flag
+      // is cleared AFTER the import commits — clearing it early calls
+      // setPlaybackActive(false) -> scheduleRefetch, racing replaceBoard and
+      // possibly painting stale data over the fresh import.
       if (animated) setPlaybackActive(true);
       try {
         const adopted = await importPeople(imported, {
@@ -247,6 +252,11 @@ export default function Board() {
         });
         if (animated) {
           setPlaybackSteps(generatePlaybackSteps(adopted));
+        } else {
+          // Import committed — now clear any leftover playback flag from a
+          // prior animated import so refetch resumes (the bug-4 fix), with no
+          // refetch racing the in-flight import.
+          setPlaybackActive(false);
         }
       } catch (err) {
         setPlaybackActive(false);
