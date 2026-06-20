@@ -117,6 +117,35 @@ describe("audit-client", () => {
     expect(row2[5]).toBe("demo");
   });
 
+  it("exportAuditLogCSV quotes a staff name containing a comma so it stays one field", () => {
+    logAuditEntry({
+      personId: "p-1",
+      personName: "張,大明",
+      fromArea: null,
+      toArea: "R1",
+      actionType: "assign",
+    });
+
+    const csv = exportAuditLogCSV();
+    const lines = csv.split("\n");
+    expect(lines[1]).toContain('"張,大明"');
+  });
+
+  it("exportAuditLogCSV neutralizes formula injection in an imported staff name (leading =)", () => {
+    logAuditEntry({
+      personId: "p-2",
+      personName: "=cmd",
+      fromArea: null,
+      toArea: "R1",
+      actionType: "assign",
+    });
+
+    const csv = exportAuditLogCSV();
+    const personField = csv.split("\n")[1].split(",")[1];
+    // Prefixed with a single quote → spreadsheets no longer evaluate it
+    expect(personField).toBe("'=cmd");
+  });
+
   it("exportAuditLogCSV exports only the given entries when provided", () => {
     logAuditEntry({
       personId: "p-1",

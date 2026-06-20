@@ -1,32 +1,11 @@
 import * as XLSX from "xlsx";
 import type { BoardPerson } from "./board-constants";
+import { toCsvRow } from "./csv";
 
 export function exportToCSV(people: BoardPerson[]): string {
   const headers = "姓名,角色,位置";
-  const rows = people.map((p) => {
-    const name = escapeCsvField(p.name);
-    const role = escapeCsvField(p.role);
-    const area = escapeCsvField(p.area ?? "未分派");
-    return `${name},${role},${area}`;
-  });
+  const rows = people.map((p) => toCsvRow([p.name, p.role, p.area ?? "未分派"]));
   return [headers, ...rows].join("\n");
-}
-
-function escapeCsvField(value: string): string {
-  // Neutralize formula injection (CWE-1236): Excel treats leading
-  // = + - @ (and tab/CR variants) as formulas. Prefix with a single
-  // quote per OWASP guidance. Only the CSV path needs this — SheetJS
-  // writes typed string cells in the XLSX path.
-  const escaped = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
-  if (
-    escaped.includes(",") ||
-    escaped.includes('"') ||
-    escaped.includes("\n") ||
-    escaped.includes("\r")
-  ) {
-    return `"${escaped.replace(/"/g, '""')}"`;
-  }
-  return escaped;
 }
 
 export function exportToXLSX(people: BoardPerson[]): Blob {

@@ -1,3 +1,4 @@
+import { toCsvRow } from "./csv";
 import type { ActionType } from "./database.types";
 
 export interface AuditEntry {
@@ -36,14 +37,14 @@ export function exportAuditLogCSV(entries?: AuditEntry[]): string {
   const source = entries ?? localAuditLog;
   const headers = "Timestamp,Person,From,To,Action,User";
   const rows = source.map((e) =>
-    [
+    toCsvRow([
       e.timestamp.toISOString(),
       e.personName,
       e.fromArea ?? "(未分派)",
       e.toArea ?? "(未分派)",
       e.actionType,
       e.userId ?? "demo",
-    ].join(","),
+    ]),
   );
   return [headers, ...rows].join("\n");
 }
