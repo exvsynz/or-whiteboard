@@ -66,7 +66,11 @@ import {
   setAreaStatus,
 } from "@/lib/board-data";
 import { localDateString } from "@/lib/board-export";
-import { saveBoard, saveAreaStatuses } from "@/lib/board-storage";
+import {
+  saveBoard,
+  saveAreaStatuses,
+  loadAreaStatuses,
+} from "@/lib/board-storage";
 
 const mockFetchRoster = vi.mocked(fetchRoster);
 const mockUpsert = vi.mocked(upsertAssignment);
@@ -522,6 +526,25 @@ describe("useBoard (JOS-207): async-correctness round 2", () => {
       status: "surgery",
       note: "手術中",
     });
+  });
+
+  it("does not cache an optimistic area-status change before the server confirms it", async () => {
+    // Successful load caches the confirmed snapshot (empty here).
+    const { result } = await renderLoaded([person("p1", "R1")]);
+
+    // Optimistic status change with the server write still in flight.
+    const set = deferred<void>();
+    mockSetAreaStatus.mockReturnValueOnce(set.promise);
+    act(() => result.current.updateAreaStatus("R1", "surgery", "a"));
+    expect(result.current.areaStatuses.get("R1")).toEqual({
+      status: "surgery",
+      note: "a",
+    }); // optimistic value shown in memory
+
+    // ...but the offline cache must NOT yet hold the unconfirmed status — only
+    // server-confirmed snapshots (load/refetch) are cached in remote mode.
+    expect(loadAreaStatuses().get("R1")).toBeUndefined();
+    act(() => set.resolve());
   });
 
   // ---- bug 3: saveNow must not report success when a flushed write failed ----

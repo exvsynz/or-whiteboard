@@ -331,6 +331,9 @@ export function useBoard(): UseBoardReturn {
           if (cancelled) return;
           setPeople(applyPending(roster));
           setAreaStatuses(statuses);
+          // Mirror the server-confirmed statuses to the local cache so the
+          // offline fallback (catch below) can restore room badges/notes.
+          saveAreaStatuses(statuses);
           setLastSyncedAt(new Date());
           setIsStale(false);
           setError(null);
@@ -375,6 +378,8 @@ export function useBoard(): UseBoardReturn {
       if (boardDateRef.current !== date) return;
       setPeople(applyPending(roster));
       setAreaStatuses(statuses);
+      // Keep the offline cache fresh with server-confirmed statuses.
+      saveAreaStatuses(statuses);
       setLastSyncedAt(new Date());
       setIsStale(false);
     } catch {
@@ -708,15 +713,13 @@ export function useBoard(): UseBoardReturn {
     [scheduleRefetch],
   );
 
-  // Persist statuses to the local cache whenever they change. In demo this is
-  // the only store; in remote mode it mirrors the roster cache (saveBoard) so
-  // the offline fallback can restore room badges/notes on a reconnect failure —
-  // remote statuses live server-side, but without this local mirror the
-  // offline catch would have nothing to restore. (Effect-based so
-  // updateAreaStatus can use a functional update without losing batched
-  // changes.)
+  // Demo mode: persist statuses whenever they change — they would otherwise
+  // vanish on reload. (Effect-based so updateAreaStatus can use a functional
+  // update without losing batched changes.) Remote mode does NOT mirror here:
+  // it caches only server-CONFIRMED statuses (on load/refetch success below),
+  // so the offline fallback never restores an unconfirmed optimistic status.
   useEffect(() => {
-    if (loadedKey !== null) {
+    if (!remote && loadedKey !== null) {
       saveAreaStatuses(areaStatuses);
     }
   }, [areaStatuses, loadedKey]);
