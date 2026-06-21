@@ -20,6 +20,7 @@ export const FIXED_TASKS = [
   "衛教室",
   "電子同意書",
   "庫房",
+  "流動",
 ];
 
 export const ROOMS = Array.from({ length: 31 }, (_, i) => `R${i + 1}`);
